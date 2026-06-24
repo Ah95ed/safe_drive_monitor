@@ -25,7 +25,7 @@ class _DrowsinessDetectorState extends State<DrowsinessDetector> {
   String _prediction = 'جاري تحميل النموذج...';
 
   int _drowsyFrameCount = 0;
-  final int _drowsyThreshold = 5;
+  final int _drowsyThreshold = 3;
 
   @override
   void initState() {
@@ -36,6 +36,12 @@ class _DrowsinessDetectorState extends State<DrowsinessDetector> {
 
   Future<void> _initAudio() async {
     _audioPlayer = AudioPlayer();
+    if (_isAlarmPlaying) {
+      await _audioPlayer.stop();
+      setState(() {
+        _isAlarmPlaying = false;
+      });
+    }
   }
 
   Future<void> _playAlarm() async {
@@ -161,9 +167,16 @@ class _DrowsinessDetectorState extends State<DrowsinessDetector> {
       final double openScore = output[1];
       final bool isEyesClosed = closedScore >= openScore;
 
+      debugPrint(
+        'Model output -> closed: $closedScore, open: $openScore, isClosed: $isEyesClosed',
+      );
+
       if (isEyesClosed) {
         _drowsyFrameCount++;
-        if (_drowsyFrameCount > _drowsyThreshold) {
+        debugPrint(
+          'Drowsy frame count: $_drowsyFrameCount / $_drowsyThreshold',
+        );
+        if (_drowsyFrameCount >= _drowsyThreshold) {
           await _playAlarm();
           if (mounted) {
             setState(() {
