@@ -13,7 +13,7 @@ dependencies:
     sdk: flutter
   cupertino_icons: 
   camera: 
-  tflite_flutter: 
+  tflite_flutter: ^0.12.1
   audioplayers: 
   permission_handler: 
   image: 
