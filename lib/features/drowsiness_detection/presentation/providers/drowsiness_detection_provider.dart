@@ -202,10 +202,28 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       _statusMessage = analysisResult.statusMessage;
       _lastPrediction = prediction;
 
+      // Print explicit console log as requested by user
+      if (prediction.isClosed) {
+        debugPrint(
+          '🙈 [EYE_STATUS] تم غلق العين (Eyes CLOSED) | '
+          'Closed: ${(prediction.closedScore * 100).toStringAsFixed(1)}% | '
+          'Open: ${(prediction.openScore * 100).toStringAsFixed(1)}% | '
+          'Alert: ${_alertState.name.toUpperCase()}',
+        );
+      } else if (prediction.isOpen) {
+        debugPrint(
+          '👁️ [EYE_STATUS] تم فتح العين (Eyes OPEN) | '
+          'Open: ${(prediction.openScore * 100).toStringAsFixed(1)}% | '
+          'Closed: ${(prediction.closedScore * 100).toStringAsFixed(1)}%',
+        );
+      }
+
       // 4. Handle audio and vibration alarms
       if (analysisResult.shouldTriggerAlarm) {
+        debugPrint('🚨🚨🚨 [ALARM] إنذار! تم اكتشاف نوم السائق! تشغيل صوت التنبيه والاهتزاز! 🚨🚨🚨');
         await _triggerAlarmFeedback();
       } else if (analysisResult.shouldStopAlarm) {
+        debugPrint('✅ [ALARM] تم استعادة يقظة السائق وإيقاف صوت الإنذار.');
         await _stopAlarmFeedback();
       }
 

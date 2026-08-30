@@ -10,8 +10,8 @@ class AppConstants {
   static const ResolutionPreset defaultCameraResolution =
       ResolutionPreset.medium;
 
-  /// Default inference throttling interval (~6-7 frames/sec).
-  static const Duration defaultInferenceInterval = Duration(milliseconds: 150);
+  /// High-speed inference interval (~15 frames/sec) for instantaneous eye detection.
+  static const Duration defaultInferenceInterval = Duration(milliseconds: 65);
 
   /// Disclaimer displayed to driver on startup.
   static const String safetyDisclaimerText =

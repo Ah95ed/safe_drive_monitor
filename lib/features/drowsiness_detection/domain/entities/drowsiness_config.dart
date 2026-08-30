@@ -19,12 +19,12 @@ class DrowsinessConfig {
   final double minimumOpenConfidence;
 
   const DrowsinessConfig({
-    this.watchingThreshold = const Duration(milliseconds: 400),
-    this.drowsyThreshold = const Duration(milliseconds: 1000),
-    this.alarmThreshold = const Duration(milliseconds: 1500),
-    this.recoveryThreshold = const Duration(milliseconds: 1000),
-    this.minimumClosedConfidence = 0.55,
-    this.minimumOpenConfidence = 0.55,
+    this.watchingThreshold = const Duration(milliseconds: 350),
+    this.drowsyThreshold = const Duration(milliseconds: 800),
+    this.alarmThreshold = const Duration(milliseconds: 1200),
+    this.recoveryThreshold = const Duration(milliseconds: 150),
+    this.minimumClosedConfidence = 0.52,
+    this.minimumOpenConfidence = 0.52,
   });
 
   DrowsinessConfig copyWith({

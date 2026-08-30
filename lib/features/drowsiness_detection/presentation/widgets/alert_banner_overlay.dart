@@ -75,7 +75,7 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
           scale: _pulseAnimation,
           child: Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             decoration: BoxDecoration(
               color: AppColors.alarmRed,
               borderRadius: BorderRadius.circular(16),
@@ -90,23 +90,29 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
             child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.warning_rounded, color: Colors.white, size: 36),
-                    SizedBox(width: 10),
-                    Text('🚨 WAKE UP!', style: AppTypography.heroAlert),
-                    SizedBox(width: 10),
-                    Icon(Icons.warning_rounded, color: Colors.white, size: 36),
-                  ],
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.warning_rounded, color: Colors.white, size: 30),
+                      SizedBox(width: 8),
+                      Text('🚨 WAKE UP!', style: AppTypography.heroAlert),
+                      SizedBox(width: 8),
+                      Icon(Icons.warning_rounded, color: Colors.white, size: 30),
+                    ],
+                  ),
                 ),
                 SizedBox(height: 4),
-                Text(
-                  'استيقظ فوراً! العينان مغمضتان!',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'استيقظ فوراً! العينان مغمضتان!',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ],

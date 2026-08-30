@@ -11,14 +11,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
-  camera: ^0.11.4
-  tflite_flutter: ^0.11.0
-  audioplayers: ^6.1.0
+  cupertino_icons:
+  camera:
+  tflite_flutter:
+  audioplayers:
   permission_handler: ^11.3.1
-  image: ^4.3.0
-  provider: ^6.1.2
-  vibration: ^3.1.4
+  permission_handler_android: 12.0.13
+  image:
+  provider:
+  vibration:
 
 dev_dependencies:
   flutter_test:

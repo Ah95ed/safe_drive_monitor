@@ -78,8 +78,19 @@ class CameraFeedView extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (isInitialized && controller != null)
-            CameraPreview(controller!)
+          if (isInitialized && controller != null && controller!.value.isInitialized)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(17),
+              child: FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: controller!.value.previewSize?.height ?? 480,
+                  height: controller!.value.previewSize?.width ?? 640,
+                  child: CameraPreview(controller!),
+                ),
+              ),
+            )
           else
             const Center(
               child: Column(
@@ -95,28 +106,51 @@ class CameraFeedView extends StatelessWidget {
               ),
             ),
 
-          // Center Reticle Overlay (Indicating 224x224 Legacy Crop zone)
+          // Eye Reticle Target Overlay (centered around driver eye zone)
           if (isMonitoring)
             Center(
               child: Container(
-                width: 200,
-                height: 200,
+                width: 210,
+                height: 160,
                 decoration: BoxDecoration(
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.35),
-                    width: 1.5,
+                    color: Colors.cyanAccent.withValues(alpha: 0.4),
+                    width: 2,
                   ),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Center(
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: Colors.cyanAccent.withValues(alpha: 0.7),
-                      shape: BoxShape.circle,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'منطقة العينين (Eye Focus)',
+                          style: TextStyle(
+                            color: Colors.cyanAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: const BoxDecoration(
+                        color: Colors.cyanAccent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

@@ -72,7 +72,17 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         ModelConstants.modelAssetPath,
         options: options,
       );
-      AppLogger.info(_tag, 'TFLite eye state model loaded successfully.');
+
+      // Pre-allocate tensors on load
+      _interpreter!.allocateTensors();
+
+      final inputTensors = _interpreter!.getInputTensors();
+      final outputTensors = _interpreter!.getOutputTensors();
+      AppLogger.info(
+        _tag,
+        'TFLite model loaded. Input shape: ${inputTensors.isNotEmpty ? inputTensors.first.shape : "unknown"}, '
+        'Output shape: ${outputTensors.isNotEmpty ? outputTensors.first.shape : "unknown"}',
+      );
     } catch (e, st) {
       AppLogger.error(_tag, 'Failed to load TFLite model', e, st);
       throw ModelLoadException('Failed to load eye state TFLite model', e);
@@ -105,23 +115,25 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     try {
       final stopwatch = Stopwatch()..start();
 
-      // Format input as [1, 224, 224, 3] or flat Float32List according to tflite_flutter
-      // For Float32List with 150528 elements, tflite_flutter handles reshape internally
-      final input = inputBuffer.reshape([
-        ModelConstants.batchSize,
-        ModelConstants.inputHeight,
-        ModelConstants.inputWidth,
-        ModelConstants.inputChannels,
-      ]);
+      // Direct copy of normalized Float32 bytes into TFLite input tensor
+      final inputBytes = inputBuffer.buffer.asUint8List();
+      final inputTensor = _interpreter!.getInputTensor(0);
+      inputTensor.data = inputBytes;
 
-      _outputBuffer[0][0] = 0.0;
-      _outputBuffer[0][1] = 0.0;
+      // Execute inference via native C-API invoke
+      _interpreter!.invoke();
 
-      _interpreter!.run(input, _outputBuffer);
+      // Read output floats directly from output tensor buffer
+      final outputTensor = _interpreter!.getOutputTensor(0);
+      final outputFloats = outputTensor.data.buffer.asFloat32List();
+
+      final double openScore = outputFloats.isNotEmpty ? outputFloats[0] : 0.0;
+      final double closedScore = outputFloats.length > 1 ? outputFloats[1] : 0.0;
+
       stopwatch.stop();
 
       final result = EyePredictionModel.fromRawOutput(
-        rawOutput: _outputBuffer[0],
+        rawOutput: [openScore, closedScore],
         inferenceTime: stopwatch.elapsed,
         timestamp: DateTime.now(),
       );

@@ -58,14 +58,23 @@ class ImagePreprocessor {
       processed = img.copyRotate(processed, angle: sensorRotation);
     }
 
-    // 2. Center crop or resize to 224x224
+    // 2. Crop to 224x224 with dynamic eye-level tracking
     if (processed.width != ModelConstants.inputWidth ||
         processed.height != ModelConstants.inputHeight) {
       if (processed.width >= ModelConstants.inputWidth &&
           processed.height >= ModelConstants.inputHeight) {
-        // Center crop 224x224 (matching Java behavior: (w - 224)/2, (h - 224)/2)
-        final int cropX = (processed.width - ModelConstants.inputWidth) ~/ 2;
-        final int cropY = (processed.height - ModelConstants.inputHeight) ~/ 2;
+        int cropX = (processed.width - ModelConstants.inputWidth) ~/ 2;
+        int cropY;
+
+        if (pipeline == DetectionPipeline.faceAware) {
+          // Dynamic Driver Eye-Zone Tracking (upper 38% region where eyes sit in driver cockpit)
+          cropY = ((processed.height - ModelConstants.inputHeight) * 0.38).round();
+          cropY = cropY.clamp(0, processed.height - ModelConstants.inputHeight);
+        } else {
+          // Legacy Center Crop (dead center)
+          cropY = (processed.height - ModelConstants.inputHeight) ~/ 2;
+        }
+
         processed = img.copyCrop(
           processed,
           x: cropX,

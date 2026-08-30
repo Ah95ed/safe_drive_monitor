@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
@@ -7,7 +6,6 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/pr
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/screens/safety_disclaimer_screen.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/alert_banner_overlay.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/camera_feed_view.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/debug_metrics_panel.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/driver_status_card.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/primary_action_button.dart';
 
@@ -77,58 +75,67 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
             ],
           ),
           body: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Alert Banner Overlay
-                  AlertBannerOverlay(
-                    alertState: provider.alertState,
-                    isMonitoring: provider.isMonitoring,
-                  ),
-                  const SizedBox(height: 14),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double screenHeight = constraints.maxHeight;
+                // Dynamically adjust camera height to screen height (prevents any overflow)
+                final double cameraHeight = (screenHeight * 0.44).clamp(200.0, 360.0);
 
-                  // Camera Feed Preview
-                  SizedBox(
-                    height: 320,
-                    child: CameraFeedView(
-                      controller: provider.cameraController,
-                      isInitialized: provider.isInitialized,
-                      isMonitoring: provider.isMonitoring,
-                      alertState: provider.alertState,
+                return SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: screenHeight - 20),
+                    child: IntrinsicHeight(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Alert Banner Overlay
+                          AlertBannerOverlay(
+                            alertState: provider.alertState,
+                            isMonitoring: provider.isMonitoring,
+                          ),
+                          const SizedBox(height: 10),
+
+                          // Camera Feed Preview with dynamic responsive height
+                          SizedBox(
+                            height: cameraHeight,
+                            child: CameraFeedView(
+                              controller: provider.cameraController,
+                              isInitialized: provider.isInitialized,
+                              isMonitoring: provider.isMonitoring,
+                              alertState: provider.alertState,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // Driver Status Card
+                          DriverStatusCard(
+                            prediction: provider.lastPrediction,
+                            statusMessage: provider.statusMessage,
+                            isMonitoring: provider.isMonitoring,
+                          ),
+                          const Spacer(),
+                          const SizedBox(height: 10),
+
+                          // Start / Stop Primary Action Button
+                          PrimaryActionButton(
+                            isMonitoring: provider.isMonitoring,
+                            onPressed: () {
+                              if (provider.isMonitoring) {
+                                provider.stopMonitoring();
+                              } else {
+                                provider.startMonitoring();
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 14),
-
-                  // Driver Status Card
-                  DriverStatusCard(
-                    prediction: provider.lastPrediction,
-                    statusMessage: provider.statusMessage,
-                    isMonitoring: provider.isMonitoring,
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Start / Stop Primary Action Button
-                  PrimaryActionButton(
-                    isMonitoring: provider.isMonitoring,
-                    onPressed: () {
-                      if (provider.isMonitoring) {
-                        provider.stopMonitoring();
-                      } else {
-                        provider.startMonitoring();
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Debug Metrics Panel (in debug mode)
-                  if (kDebugMode) ...[
-                    const DebugMetricsPanel(),
-                    const SizedBox(height: 14),
-                  ],
-                ],
-              ),
+                );
+              },
             ),
           ),
         );
