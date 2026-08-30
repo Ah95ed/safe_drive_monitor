@@ -1,23 +1,14 @@
 import 'package:flutter/material.dart';
-import 'screens/home_screen.dart';
+import 'package:flutter/services.dart';
+import 'package:safe_drive_monitor/app/app.dart';
 
-void main() {
-  runApp(const MyApp());
-}
-// star app
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Safe Drive Monitor',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      ///
-      home: const HomeScreen(),
-    );
-  }
+  // Lock to portrait orientation for driving holder consistency
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
+  runApp(const SafeDriveApp());
 }
