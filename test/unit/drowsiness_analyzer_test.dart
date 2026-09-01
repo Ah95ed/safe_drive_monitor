@@ -3,6 +3,7 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/drowsiness_config.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/drowsiness_analyzer.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/perclos_calculator.dart';
 
 void main() {
   group('DrowsinessAnalyzer State Machine Unit Tests', () {
@@ -121,6 +122,106 @@ void main() {
           state: EyeState.open, timeOffset: const Duration(milliseconds: 2800)));
       expect(r3.alertState, equals(DriverAlertState.normal));
       expect(r3.shouldStopAlarm, isTrue);
+    });
+
+    test('Single noisy CLOSED frame between OPENs is debounced away (no alarm)', () {
+      analyzer.processPrediction(
+          createPrediction(state: EyeState.open, timeOffset: Duration.zero));
+      analyzer.processPrediction(createPrediction(
+          state: EyeState.open, timeOffset: const Duration(milliseconds: 200)));
+      // One isolated low-confidence CLOSED reading.
+      final noisy = analyzer.processPrediction(EyePrediction(
+        state: EyeState.closed,
+        openScore: 0.42,
+        closedScore: 0.58,
+        confidence: 0.58,
+        inferenceTime: const Duration(milliseconds: 20),
+        timestamp: baseTime.add(const Duration(milliseconds: 400)),
+      ));
+      expect(noisy.alertState, DriverAlertState.normal);
+      expect(noisy.continuousClosedDuration, Duration.zero);
+
+      final back = analyzer.processPrediction(createPrediction(
+          state: EyeState.open, timeOffset: const Duration(milliseconds: 600)));
+      expect(back.alertState, DriverAlertState.normal);
+    });
+
+    test('Sustained CLOSED (2+ frames) still escalates to alarm after threshold', () {
+      analyzer.processPrediction(createPrediction(
+          state: EyeState.closed, timeOffset: const Duration(milliseconds: 0)));
+      analyzer.processPrediction(createPrediction(
+          state: EyeState.closed, timeOffset: const Duration(milliseconds: 100)));
+      final r = analyzer.processPrediction(createPrediction(
+          state: EyeState.closed, timeOffset: const Duration(milliseconds: 1700)));
+      expect(r.alertState, DriverAlertState.alarm);
+      expect(r.shouldTriggerAlarm, isTrue);
+    });
+
+    test('High-confidence CLOSED switches immediately (no debounce delay)', () {
+      analyzer.processPrediction(
+          createPrediction(state: EyeState.open, timeOffset: Duration.zero));
+      final r = analyzer.processPrediction(EyePrediction(
+        state: EyeState.closed,
+        openScore: 0.05,
+        closedScore: 0.95,
+        confidence: 0.95,
+        inferenceTime: const Duration(milliseconds: 20),
+        timestamp: baseTime.add(const Duration(milliseconds: 100)),
+      ));
+      // Debounce is bypassed at high confidence, so the closed clock starts now.
+      expect(r.continuousClosedDuration, Duration.zero);
+      final r2 = analyzer.processPrediction(EyePrediction(
+        state: EyeState.closed,
+        openScore: 0.05,
+        closedScore: 0.95,
+        confidence: 0.95,
+        inferenceTime: const Duration(milliseconds: 20),
+        timestamp: baseTime.add(const Duration(milliseconds: 700)),
+      ));
+      expect(r2.alertState, DriverAlertState.watching);
+    });
+
+    test('High PERCLOS on its own escalates to drowsy but never the loud alarm', () {
+      // A warmed-up PERCLOS window that is already above the alarm threshold.
+      final analyzerWithPerclos = DrowsinessAnalyzer(
+        config: const DrowsinessConfig(
+          watchingThreshold: Duration(milliseconds: 400),
+          drowsyThreshold: Duration(milliseconds: 1000),
+          alarmThreshold: Duration(milliseconds: 1500),
+        ),
+        perclosCalculator: PerclosCalculator(
+          minReadySamples: 1,
+          minReadyDuration: Duration.zero,
+          warningThreshold: 0.1,
+          alarmThreshold: 0.2,
+        ),
+      );
+
+      DriverAlertState last = DriverAlertState.normal;
+      for (var i = 0; i < 20; i++) {
+        // Short blinks only (200ms closed), well under the alarm duration.
+        final closed = analyzerWithPerclos.processPrediction(EyePrediction(
+          state: EyeState.closed,
+          openScore: 0.1,
+          closedScore: 0.9,
+          confidence: 0.9,
+          inferenceTime: const Duration(milliseconds: 20),
+          timestamp: baseTime.add(Duration(milliseconds: 1000 * i)),
+        ));
+        expect(closed.shouldTriggerAlarm, isFalse);
+        expect(closed.alertState, isNot(DriverAlertState.alarm));
+        last = closed.alertState;
+
+        analyzerWithPerclos.processPrediction(EyePrediction(
+          state: EyeState.open,
+          openScore: 0.9,
+          closedScore: 0.1,
+          confidence: 0.9,
+          inferenceTime: const Duration(milliseconds: 20),
+          timestamp: baseTime.add(Duration(milliseconds: 1000 * i + 200)),
+        ));
+      }
+      expect(last, DriverAlertState.drowsy);
     });
 
     test('Alternating low confidence / unknown predictions do not trigger false alarm', () {

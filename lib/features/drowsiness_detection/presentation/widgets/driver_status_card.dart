@@ -7,12 +7,16 @@ class DriverStatusCard extends StatelessWidget {
   final EyePrediction? prediction;
   final String statusMessage;
   final bool isMonitoring;
+  final double perclosPercentage;
+  final bool isHeadNodDetected;
 
   const DriverStatusCard({
     super.key,
     required this.prediction,
     required this.statusMessage,
     required this.isMonitoring,
+    this.perclosPercentage = 0.0,
+    this.isHeadNodDetected = false,
   });
 
   @override
@@ -47,6 +51,13 @@ class DriverStatusCard extends StatelessWidget {
 
     final double confidence = prediction?.confidence ?? 0.0;
     final int confidencePercent = (confidence * 100).round();
+
+    Color perclosColor = AppColors.normalGreen;
+    if (perclosPercentage >= 25.0) {
+      perclosColor = AppColors.alarmRed;
+    } else if (perclosPercentage >= 15.0) {
+      perclosColor = AppColors.watchingAmber;
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -102,6 +113,56 @@ class DriverStatusCard extends StatelessWidget {
               fontSize: 14,
             ),
           ),
+          if (isMonitoring) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'مؤشر الإجهاد التراكمي (PERCLOS): ',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      '${perclosPercentage.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: perclosColor,
+                      ),
+                    ),
+                  ],
+                ),
+                if (isHeadNodDetected)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.alarmRed.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.alarmRed, width: 0.8),
+                    ),
+                    child: const Text(
+                      '⚠️ انحناء رأس',
+                      style: TextStyle(fontSize: 10, color: AppColors.alarmRed, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: (perclosPercentage / 100.0).clamp(0.0, 1.0),
+                minHeight: 4,
+                backgroundColor: AppColors.surfaceElevated,
+                valueColor: AlwaysStoppedAnimation<Color>(perclosColor),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -5,6 +5,12 @@ import 'package:flutter/foundation.dart';
 class AppLogger {
   AppLogger._();
 
+  static void debug(String tag, String message) {
+    if (kDebugMode) {
+      debugPrint('[DEBUG][$tag] $message');
+    }
+  }
+
   static void info(String tag, String message) {
     if (kDebugMode) {
       debugPrint('[INFO][$tag] $message');

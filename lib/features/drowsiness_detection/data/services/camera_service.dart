@@ -86,7 +86,7 @@ class AppCameraService implements CameraService {
     if (!isInitialized) {
       throw const CameraInitializationException('الكاميرا غير مهيأة لبدء البث');
     }
-    if (_isStreaming) return;
+    if (_isStreaming || _controller!.value.isStreamingImages) return;
 
     try {
       _isStreaming = true;
@@ -101,13 +101,16 @@ class AppCameraService implements CameraService {
 
   @override
   Future<void> stopImageStream() async {
-    if (!_isStreaming || _controller == null) return;
-    try {
-      _isStreaming = false;
-      await _controller!.stopImageStream();
-      AppLogger.info(_tag, 'Camera image stream stopped.');
-    } catch (e, st) {
-      AppLogger.error(_tag, 'Error stopping image stream', e, st);
+    _isStreaming = false;
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    if (_controller!.value.isStreamingImages) {
+      try {
+        await _controller!.stopImageStream();
+        AppLogger.info(_tag, 'Camera image stream stopped.');
+      } catch (e) {
+        AppLogger.warning(_tag, 'Notice while stopping image stream: $e');
+      }
     }
   }
 
@@ -115,11 +118,15 @@ class AppCameraService implements CameraService {
   Future<void> dispose() async {
     try {
       await stopImageStream();
-      await _controller?.dispose();
-      _controller = null;
+      if (_controller != null) {
+        // Allow in-flight platform channel frames to settle before tearing down.
+        await Future.delayed(const Duration(milliseconds: 60));
+        await _controller?.dispose();
+        _controller = null;
+      }
       AppLogger.info(_tag, 'Camera service disposed.');
-    } catch (e, st) {
-      AppLogger.error(_tag, 'Error disposing camera service', e, st);
+    } catch (e) {
+      AppLogger.error(_tag, 'Error disposing camera service', e);
     }
   }
 }

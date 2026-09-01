@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/providers/drowsiness_detection_provider.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/screens/driving_hud_screen.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/screens/safety_disclaimer_screen.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/alert_banner_overlay.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/camera_feed_view.dart';
@@ -68,6 +69,17 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
             ),
             actions: [
               IconButton(
+                icon: const Icon(Icons.speed_rounded, color: AppColors.primaryCyan),
+                tooltip: 'وضع القيادة المظلمة (HUD Mode)',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DrivingHudScreen(),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
                 icon: const Icon(Icons.info_outline, color: AppColors.textSecondary),
                 tooltip: 'إرشادات السلامة',
                 onPressed: () => SafetyDisclaimerDialog.show(context),
@@ -104,16 +116,20 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
                               controller: provider.cameraController,
                               isInitialized: provider.isInitialized,
                               isMonitoring: provider.isMonitoring,
+                              hasDriverFace: provider.hasValidDriverFace,
+                              isLowLight: provider.isLowLight,
                               alertState: provider.alertState,
                             ),
                           ),
                           const SizedBox(height: 10),
 
-                          // Driver Status Card
+                          // Driver Status Card with PERCLOS & Head Nod indicator
                           DriverStatusCard(
                             prediction: provider.lastPrediction,
                             statusMessage: provider.statusMessage,
                             isMonitoring: provider.isMonitoring,
+                            perclosPercentage: provider.perclosPercentage,
+                            isHeadNodDetected: provider.isHeadNodDetected,
                           ),
                           const Spacer(),
                           const SizedBox(height: 10),

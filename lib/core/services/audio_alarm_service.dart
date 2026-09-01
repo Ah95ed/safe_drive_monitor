@@ -13,11 +13,39 @@ class AppAudioAlarmService implements AudioAlarmService {
   static const String _tag = 'AudioAlarmService';
   final AudioPlayer _player;
   bool _isPlaying = false;
+  bool _contextConfigured = false;
 
   AppAudioAlarmService({AudioPlayer? player}) : _player = player ?? AudioPlayer();
 
   @override
   bool get isPlaying => _isPlaying;
+
+  Future<void> _configureAudioContext() async {
+    if (_contextConfigured) return;
+    try {
+      await _player.setAudioContext(
+        AudioContext(
+          android: AudioContextAndroid(
+            isSpeakerphoneOn: true,
+            stayAwake: true,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.alarm,
+            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          ),
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: {
+              AVAudioSessionOptions.duckOthers,
+              AVAudioSessionOptions.defaultToSpeaker,
+            },
+          ),
+        ),
+      );
+      _contextConfigured = true;
+    } catch (e) {
+      AppLogger.warning(_tag, 'Could not configure audio focus context: $e');
+    }
+  }
 
   @override
   Future<void> playAlarm() async {
@@ -26,10 +54,11 @@ class AppAudioAlarmService implements AudioAlarmService {
     }
     try {
       _isPlaying = true;
+      await _configureAudioContext();
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.setVolume(1.0);
       await _player.play(AssetSource(AppConstants.alarmSoundAsset));
-      AppLogger.info(_tag, 'Alarm audio started playing (looping).');
+      AppLogger.info(_tag, 'Alarm audio started playing (looping with AudioFocus ducking).');
     } catch (e, st) {
       _isPlaying = false;
       AppLogger.error(_tag, 'Failed to play alarm audio', e, st);

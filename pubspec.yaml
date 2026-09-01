@@ -20,6 +20,7 @@ dependencies:
   image:
   provider:
   vibration:
+  google_mlkit_face_detection: ^0.12.0
 
 dev_dependencies:
   flutter_test:
@@ -34,17 +35,6 @@ flutter:
     - assets/sounds/
     - assets/images/
 
-  # An image asset can refer to one or more resolution-specific "variants", see
-  # https://flutter.dev/to/resolution-aware-images
-
-  # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
-
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
   # fonts:
   #   - family: Schyler
   #     fonts:
