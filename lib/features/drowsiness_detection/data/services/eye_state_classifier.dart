@@ -138,7 +138,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         ModelConstants.outputClasses,
       ];
 
-      // 1. Validate input tensor shape [1, 224, 224, 3]
+      // 1. Validate input tensor shape [1, H, W, 3]
       if (inputTensor.shape.length != expectedInputShape.length ||
           inputTensor.shape[0] != expectedInputShape[0] ||
           inputTensor.shape[1] != expectedInputShape[1] ||
@@ -149,10 +149,11 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         );
       }
 
-      // 2. Validate input tensor type Float32
-      if (inputTensor.type != TensorType.float32) {
+      // 2. Validate input tensor type Float32 or Float16
+      if (inputTensor.type != TensorType.float32 &&
+          inputTensor.type != TensorType.float16) {
         throw ModelLoadException(
-          'TFLite model input type mismatch: got ${inputTensor.type}, expected ${TensorType.float32}',
+          'TFLite model input type mismatch: got ${inputTensor.type}, expected ${TensorType.float32} or ${TensorType.float16}',
         );
       }
 
@@ -165,10 +166,11 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         );
       }
 
-      // 4. Validate output tensor type Float32
-      if (outputTensor.type != TensorType.float32) {
+      // 4. Validate output tensor type Float32 or Float16
+      if (outputTensor.type != TensorType.float32 &&
+          outputTensor.type != TensorType.float16) {
         throw ModelLoadException(
-          'TFLite model output type mismatch: got ${outputTensor.type}, expected ${TensorType.float32}',
+          'TFLite model output type mismatch: got ${outputTensor.type}, expected ${TensorType.float32} or ${TensorType.float16}',
         );
       }
 
@@ -216,12 +218,16 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     try {
       final stopwatch = Stopwatch()..start();
 
-      // Direct copy of normalized Float32 bytes into TFLite input tensor respecting offsets
-      final inputBytes = inputBuffer.buffer.asUint8List(
-        inputBuffer.offsetInBytes,
-        inputBuffer.lengthInBytes,
-      );
       final inputTensor = _interpreter!.getInputTensor(0);
+      final Uint8List inputBytes;
+      if (inputTensor.type == TensorType.float16) {
+        inputBytes = _convertFloat32ToHalfBytes(inputBuffer);
+      } else {
+        inputBytes = inputBuffer.buffer.asUint8List(
+          inputBuffer.offsetInBytes,
+          inputBuffer.lengthInBytes,
+        );
+      }
       inputTensor.data = inputBytes;
 
       // Execute inference via native C-API invoke
@@ -229,14 +235,23 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
 
       // Read output floats directly from output tensor buffer respecting offsets
       final outputTensor = _interpreter!.getOutputTensor(0);
-      final outputBytes = outputTensor.data;
-      final outputFloats = outputBytes.buffer.asFloat32List(
-        outputBytes.offsetInBytes,
-        outputBytes.lengthInBytes ~/ 4,
-      );
+      final double openScore;
+      final double closedScore;
 
-      final double openScore = outputFloats.isNotEmpty ? outputFloats[0] : 0.0;
-      final double closedScore = outputFloats.length > 1 ? outputFloats[1] : 0.0;
+      if (outputTensor.type == TensorType.float16) {
+        final outputBytes = outputTensor.data;
+        final halfList = _convertHalfBytesToFloat32List(outputBytes);
+        openScore = halfList.isNotEmpty ? halfList[0] : 0.0;
+        closedScore = halfList.length > 1 ? halfList[1] : 0.0;
+      } else {
+        final outputBytes = outputTensor.data;
+        final outputFloats = outputBytes.buffer.asFloat32List(
+          outputBytes.offsetInBytes,
+          outputBytes.lengthInBytes ~/ 4,
+        );
+        openScore = outputFloats.isNotEmpty ? outputFloats[0] : 0.0;
+        closedScore = outputFloats.length > 1 ? outputFloats[1] : 0.0;
+      }
 
       stopwatch.stop();
 
@@ -277,8 +292,10 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
   /// Renders the normalized model input buffer as a small ASCII luminance grid so
   /// the actual crop fed to the network is visible in `adb logcat`.
   void _logAsciiThumbnail(Float32List buf) {
-    const int w = 224, h = 224;
-    const int cols = 40, rows = 24;
+    const int w = ModelConstants.inputWidth;
+    const int h = ModelConstants.inputHeight;
+    const int cols = 40;
+    const int rows = 24;
     const int plane = w * h;
     const String ramp = ' .:-=+*#%@';
     final bool planar = _preprocessor.channelLayout == TensorChannelLayout.planarRgb;
@@ -303,6 +320,88 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       sb.write('\n');
     }
     AppLogger.debug(_tag, 'model-input thumbnail (${cols}x$rows):$sb');
+  }
+
+  Uint8List _convertFloat32ToHalfBytes(Float32List input) {
+    final output = Uint8List(input.length * 2);
+    final inputView = ByteData.view(input.buffer, input.offsetInBytes, input.lengthInBytes);
+    final outputView = ByteData.sublistView(output);
+    for (int i = 0; i < input.length; i++) {
+      final int f = inputView.getUint32(i * 4, Endian.little);
+      final bits = _float32ToHalfBits(f);
+      outputView.setUint16(i * 2, bits, Endian.little);
+    }
+    return output;
+  }
+
+  Float32List _convertHalfBytesToFloat32List(Uint8List halfBytes) {
+    final output = Float32List(halfBytes.length ~/ 2);
+    final inputView = ByteData.view(halfBytes.buffer, halfBytes.offsetInBytes, halfBytes.lengthInBytes);
+    for (int i = 0; i < output.length; i++) {
+      final bits = inputView.getUint16(i * 2, Endian.little);
+      output[i] = _halfBitsToFloat32(bits);
+    }
+    return output;
+  }
+
+  int _float32ToHalfBits(int f) {
+    if ((f & 0x7FFFFFFF) == 0) {
+      return (f >> 16) & 0x8000;
+    }
+    if ((f & 0x7F800000) == 0x7F800000) {
+      return ((f >> 16) & 0x8000) | 0x7C00 | ((f & 0x7FFFFF) != 0 ? 0x200 : 0);
+    }
+
+    int exponent = ((f >> 23) & 0xFF) - 127 + 15;
+    final int mantissa = (f >> 13) & 0x3FF;
+
+    if (exponent <= 0) {
+      if (exponent <= -10) {
+        return (f >> 16) & 0x8000;
+      }
+      int m = (0x400 + mantissa) >> (-exponent + 1);
+      m += (m & 1);
+      if (m > 0x3FF) m = 0x3FF;
+      return ((f >> 16) & 0x8000) | m;
+    }
+
+    if (exponent >= 31) {
+      return ((f >> 16) & 0x8000) | 0x7C00;
+    }
+
+    return ((f >> 16) & 0x8000) | (exponent << 10) | mantissa;
+  }
+
+  double _halfBitsToFloat32(int bits) {
+    final int sign = (bits >> 15) & 0x1;
+    final int exponent = (bits >> 10) & 0x1F;
+    final int mantissa = bits & 0x3FF;
+
+    if (exponent == 0) {
+      if (mantissa == 0) {
+        return sign == 1 ? -0.0 : 0.0;
+      }
+      double m = mantissa / 1024.0;
+      int shift = 1;
+      while (m < 1.0 && shift <= 10) {
+        m *= 2.0;
+        shift++;
+      }
+      return sign == 1 ? -m : m;
+    } else if (exponent == 31) {
+      if (mantissa == 0) {
+        return sign == 1 ? double.negativeInfinity : double.infinity;
+      }
+      return double.nan;
+    }
+
+    final int fExponent = exponent - 15 + 127;
+    final int fMantissa = mantissa << 13;
+    final int fBits = (sign << 31) | (fExponent << 23) | fMantissa;
+
+    final bd = ByteData(4);
+    bd.setUint32(0, fBits, Endian.little);
+    return bd.getFloat32(0, Endian.little);
   }
 
   @override

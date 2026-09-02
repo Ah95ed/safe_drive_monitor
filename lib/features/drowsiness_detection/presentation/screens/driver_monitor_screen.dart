@@ -109,18 +109,19 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
                           ),
                           const SizedBox(height: 10),
 
-                          // Camera Feed Preview with dynamic responsive height
-                          SizedBox(
-                            height: cameraHeight,
-                            child: CameraFeedView(
-                              controller: provider.cameraController,
-                              isInitialized: provider.isInitialized,
-                              isMonitoring: provider.isMonitoring,
-                              hasDriverFace: provider.hasValidDriverFace,
-                              isLowLight: provider.isLowLight,
-                              alertState: provider.alertState,
-                            ),
-                          ),
+                           // Camera Feed Preview with dynamic responsive height
+                           SizedBox(
+                             height: cameraHeight,
+                             child: CameraFeedView(
+                               controller: provider.cameraController,
+                               isInitialized: provider.isInitialized,
+                               isMonitoring: provider.isMonitoring,
+                               hasDriverFace: provider.hasValidDriverFace,
+                               isLowLight: provider.isLowLight,
+                               alertState: provider.alertState,
+                               lastPrediction: provider.lastPrediction,
+                             ),
+                           ),
                           const SizedBox(height: 10),
 
                           // Driver Status Card with PERCLOS & Head Nod indicator

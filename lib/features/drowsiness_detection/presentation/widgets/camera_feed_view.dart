@@ -2,6 +2,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 
 class CameraFeedView extends StatelessWidget {
   final CameraController? controller;
@@ -10,6 +11,7 @@ class CameraFeedView extends StatelessWidget {
   final bool hasDriverFace;
   final bool isLowLight;
   final DriverAlertState alertState;
+  final EyePrediction? lastPrediction;
 
   const CameraFeedView({
     super.key,
@@ -19,6 +21,7 @@ class CameraFeedView extends StatelessWidget {
     this.hasDriverFace = false,
     this.isLowLight = false,
     required this.alertState,
+    this.lastPrediction,
   });
 
   @override
@@ -209,6 +212,63 @@ class CameraFeedView extends StatelessWidget {
                       style: TextStyle(
                         color: AppColors.watchingAmber,
                         fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          // Eye State Indicator under camera
+          if (isMonitoring && lastPrediction != null)
+            Positioned(
+              bottom: 12,
+              left: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: lastPrediction!.isClosed
+                        ? AppColors.alarmRed
+                        : lastPrediction!.isOpen
+                            ? AppColors.normalGreen
+                            : AppColors.watchingAmber,
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      lastPrediction!.isClosed
+                          ? Icons.visibility_off
+                          : lastPrediction!.isOpen
+                              ? Icons.visibility
+                              : Icons.help_outline,
+                      size: 14,
+                      color: lastPrediction!.isClosed
+                          ? AppColors.alarmRed
+                          : lastPrediction!.isOpen
+                              ? AppColors.normalGreen
+                              : AppColors.watchingAmber,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      lastPrediction!.isClosed
+                          ? 'العين مغلقة'
+                          : lastPrediction!.isOpen
+                              ? 'العين مفتوحة'
+                              : 'غير محدد',
+                      style: TextStyle(
+                        color: lastPrediction!.isClosed
+                            ? AppColors.alarmRed
+                            : lastPrediction!.isOpen
+                                ? AppColors.normalGreen
+                                : AppColors.watchingAmber,
+                        fontSize: 12,
                         fontWeight: FontWeight.bold,
                       ),
                     ),

@@ -2,16 +2,15 @@ name: Safe Drive CI/CD
 
 on:
   push:
-    branches: [main]
+    tags:
+      - "v*"   # يشتغل عند رفع تاغ مثل v1.0.0
 
 jobs:
   build_android:
     name: APK Build
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        abi: [armeabi-v7a, arm64-v8a, x86_64]
+    permissions:
+      contents: write   # ضرورية لإنشاء Release
 
     steps:
       - name: Checkout code
@@ -29,23 +28,34 @@ jobs:
           channel: "stable"
           flutter-version: "3.47.2"
 
-      - name: clean Project
-        run: flutter clean
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/key.jks
 
-      - name: flutter update package
-        run: flutter pub upgrade
-
-      - name: clean outdated
-        run: flutter pub outdated
+      - name: Create key.properties
+        run: |
+          cat <<EOF > android/key.properties
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=key.jks
+          EOF
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APKs
-        run: flutter build apk --split-per-abi
+      - name: Build APK
+        run: flutter build apk --release
 
-      - name: Upload APK Artifacts (Individual Files)
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.abi }}
-          path: build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

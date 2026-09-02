@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer';
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:safe_drive_monitor/app/app.dart';
@@ -12,7 +13,11 @@ Future<void> main() async {
 
       FlutterError.onError = (FlutterErrorDetails details) {
         FlutterError.presentError(details);
-        log('Flutter error: ${details.exceptionAsString()}', error: details.exception, stackTrace: details.stack);
+        log(
+          'Flutter error: ${details.exceptionAsString()}',
+          error: details.exception,
+          stackTrace: details.stack,
+        );
       };
 
       PlatformDispatcher.instance.onError = (error, stack) {
@@ -21,7 +26,9 @@ Future<void> main() async {
       };
 
       // Lock to portrait orientation for driving holder consistency
-      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
 
       runApp(const SafeDriveApp());
     },
