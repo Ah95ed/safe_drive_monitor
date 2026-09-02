@@ -16,3 +16,9 @@
 -keep class com.google.mlkit.vision.face.** { *; }
 -keep class com.google.mlkit.common.** { *; }
 -dontwarn com.google.mlkit.**
+
+-dontwarn com.google.android.play.core.splitcompat.**
+-dontwarn com.google.android.play.core.splitinstall.**
+-dontwarn com.google.android.play.core.tasks.**
+-dontwarn io.flutter.embedding.engine.deferredcomponents.**
+-dontwarn io.flutter.embedding.android.FlutterPlayStoreSplitApplication
