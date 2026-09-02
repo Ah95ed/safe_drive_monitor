@@ -14,6 +14,9 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 
 abstract class EyeStateClassifier {
   bool get isLoaded;
+  ModelArchitecture get architecture;
+  bool get invertYoloClasses;
+  set invertYoloClasses(bool value);
   TensorChannelLayout get channelLayout;
   set channelLayout(TensorChannelLayout layout);
   DetectionPipeline get pipeline;
@@ -26,7 +29,6 @@ abstract class EyeStateClassifier {
   set minClosedConfidence(double value);
   bool get useDirectFastPipeline;
   set useDirectFastPipeline(bool value);
-  set debugRawOutput(bool value);
   set roiStrategy(RoiStrategy value);
 
   Future<void> load();
@@ -45,12 +47,13 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
 
   Interpreter? _interpreter;
   final ImagePreprocessor _preprocessor;
+  ModelArchitecture _architecture = ModelArchitecture.yoloDetector;
 
-  /// When true, logs raw model output + ROI + layout once per second so the
-  /// open/closed label order and preprocessing can be verified on-device.
-  bool debugRawOutput = false;
-  DateTime _lastRawLog = DateTime.fromMillisecondsSinceEpoch(0);
-  Rect? _lastRoi;
+  @override
+  bool invertYoloClasses = false;
+
+  @override
+  ModelArchitecture get architecture => _architecture;
 
   @override
   ModelOutputMode outputMode;
@@ -127,27 +130,18 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       final inputTensor = inputTensors.first;
       final outputTensor = outputTensors.first;
 
-      final expectedInputShape = [
-        ModelConstants.batchSize,
-        ModelConstants.inputHeight,
-        ModelConstants.inputWidth,
-        ModelConstants.inputChannels,
-      ];
-      final expectedOutputShape = [
-        ModelConstants.outputBatch,
-        ModelConstants.outputClasses,
-      ];
-
-      // 1. Validate input tensor shape [1, H, W, 3]
-      if (inputTensor.shape.length != expectedInputShape.length ||
-          inputTensor.shape[0] != expectedInputShape[0] ||
-          inputTensor.shape[1] != expectedInputShape[1] ||
-          inputTensor.shape[2] != expectedInputShape[2] ||
-          inputTensor.shape[3] != expectedInputShape[3]) {
+      // 1. Validate and adapt to input tensor shape [1, H, W, 3]
+      if (inputTensor.shape.length != 4 ||
+          inputTensor.shape[0] != 1 ||
+          inputTensor.shape[3] != 3) {
         throw ModelLoadException(
-          'TFLite model input shape mismatch: got ${inputTensor.shape}, expected $expectedInputShape',
+          'TFLite model input shape mismatch: got ${inputTensor.shape}, expected [1, H, W, 3]',
         );
       }
+
+      final int inH = inputTensor.shape[1];
+      final int inW = inputTensor.shape[2];
+      _preprocessor.setInputDimensions(inW, inH);
 
       // 2. Validate input tensor type Float32 or Float16
       if (inputTensor.type != TensorType.float32 &&
@@ -157,28 +151,37 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         );
       }
 
-      // 3. Validate output tensor shape [1, 2]
-      if (outputTensor.shape.length != expectedOutputShape.length ||
-          outputTensor.shape[0] != expectedOutputShape[0] ||
-          outputTensor.shape[1] != expectedOutputShape[1]) {
+      // 3. Detect architecture from output tensor shape:
+      // YOLOv5/v8: [1, N, 7] (e.g. [1, 6300, 7])
+      // Classification: [1, 2] or [1, 1, 2]
+      final bool isYolo = (outputTensor.shape.length == 3 && outputTensor.shape[2] == 7) ||
+                          (outputTensor.shape.length == 2 && outputTensor.shape[1] == 7);
+      final bool isClassification = (outputTensor.shape.length == 2 && outputTensor.shape[1] == 2) ||
+                                    (outputTensor.shape.length == 3 && outputTensor.shape[2] == 2);
+
+      if (!isYolo && !isClassification) {
         throw ModelLoadException(
-          'TFLite model output shape mismatch: got ${outputTensor.shape}, expected $expectedOutputShape',
+          'Unsupported TFLite output shape: ${outputTensor.shape}. '
+          'Expected [1, 2] (classification) or [1, N, 7] (YOLO detector)',
         );
       }
 
-      // 4. Validate output tensor type Float32 or Float16
-      if (outputTensor.type != TensorType.float32 &&
-          outputTensor.type != TensorType.float16) {
-        throw ModelLoadException(
-          'TFLite model output type mismatch: got ${outputTensor.type}, expected ${TensorType.float32} or ${TensorType.float16}',
-        );
+      _architecture = isYolo ? ModelArchitecture.yoloDetector : ModelArchitecture.classification;
+
+      // 4. Set appropriate normalization:
+      // YOLO models use [0.0, 1.0] (zeroToOne), while older TF classifier uses [-1.0, 1.0] (minusOneToOne)
+      if (isYolo) {
+        _preprocessor.normalization = ModelInputNormalization.zeroToOne;
+      } else {
+        _preprocessor.normalization = ModelInputNormalization.minusOneToOne;
       }
 
       AppLogger.info(
         _tag,
-        'TFLite model validated and loaded successfully. '
-        'Input shape: ${inputTensor.shape} (${inputTensor.type.name}), '
-        'Output shape: ${outputTensor.shape} (${outputTensor.type.name})',
+        'TFLite model loaded successfully: architecture=${_architecture.name}, '
+        'input=${inputTensor.shape} (${inputTensor.type.name}), '
+        'output=${outputTensor.shape} (${outputTensor.type.name}), '
+        'normalization=${_preprocessor.normalization.name}',
       );
     } catch (e, st) {
       AppLogger.error(_tag, 'Failed to load or validate TFLite model', e, st);
@@ -204,7 +207,6 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       isMirrored: isMirrored,
       dynamicRoi: dynamicRoi,
     );
-    _lastRoi = dynamicRoi;
 
     return classifyFloat32(inputTensor);
   }
@@ -235,42 +237,63 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
 
       // Read output floats directly from output tensor buffer respecting offsets
       final outputTensor = _interpreter!.getOutputTensor(0);
-      final double openScore;
-      final double closedScore;
+      final Float32List outputFloats;
 
       if (outputTensor.type == TensorType.float16) {
         final outputBytes = outputTensor.data;
-        final halfList = _convertHalfBytesToFloat32List(outputBytes);
-        openScore = halfList.isNotEmpty ? halfList[0] : 0.0;
-        closedScore = halfList.length > 1 ? halfList[1] : 0.0;
+        outputFloats = _convertHalfBytesToFloat32List(outputBytes);
       } else {
         final outputBytes = outputTensor.data;
-        final outputFloats = outputBytes.buffer.asFloat32List(
+        outputFloats = outputBytes.buffer.asFloat32List(
           outputBytes.offsetInBytes,
           outputBytes.lengthInBytes ~/ 4,
         );
+      }
+
+      double openScore;
+      double closedScore;
+
+      if (_architecture == ModelArchitecture.yoloDetector) {
+        // Output format [1, N, 7] (e.g. 6300 candidate boxes)
+        final int numCandidates = outputFloats.length ~/ 7;
+        double maxConf0 = 0.0;
+        double maxConf1 = 0.0;
+        int detectedBoxes = 0;
+
+        for (int i = 0; i < numCandidates; i++) {
+          final int base = i * 7;
+          final double objConf = outputFloats[base + 4];
+          if (objConf < 0.20) continue; // Filter background noise
+
+          final double c0 = outputFloats[base + 5];
+          final double c1 = outputFloats[base + 6];
+          final double score0 = objConf * c0;
+          final double score1 = objConf * c1;
+
+          if (score0 > maxConf0) maxConf0 = score0;
+          if (score1 > maxConf1) maxConf1 = score1;
+          detectedBoxes++;
+        }
+
+        if (detectedBoxes == 0) {
+          openScore = 0.0;
+          closedScore = 0.0;
+        } else if (invertYoloClasses) {
+          openScore = maxConf0;
+          closedScore = maxConf1;
+        } else {
+          // In Roboflow YOLO dataset (rmbg_all):
+          // Class 0: closedeyes, Class 1: openeyes
+          closedScore = maxConf0;
+          openScore = maxConf1;
+        }
+      } else {
+        // Classification model [1, 2]
         openScore = outputFloats.isNotEmpty ? outputFloats[0] : 0.0;
         closedScore = outputFloats.length > 1 ? outputFloats[1] : 0.0;
       }
 
       stopwatch.stop();
-
-      if (debugRawOutput) {
-        final now = DateTime.now();
-        if (now.difference(_lastRawLog) >= const Duration(seconds: 1)) {
-          _lastRawLog = now;
-          AppLogger.debug(
-            _tag,
-            'RAW out=[${openScore.toStringAsFixed(4)}, ${closedScore.toStringAsFixed(4)}] '
-            'sum=${(openScore + closedScore).toStringAsFixed(4)} '
-            'layout=${_preprocessor.channelLayout.name} '
-            'pipeline=${_preprocessor.pipeline.name} '
-            'roiStrat=${_preprocessor.roiStrategy.name} '
-            'roi=${_lastRoi == null ? "none" : "${_lastRoi!.left.toStringAsFixed(0)},${_lastRoi!.top.toStringAsFixed(0)} ${_lastRoi!.width.toStringAsFixed(0)}x${_lastRoi!.height.toStringAsFixed(0)}"}',
-          );
-          _logAsciiThumbnail(inputBuffer);
-        }
-      }
 
       final result = EyePredictionModel.fromRawOutput(
         rawOutput: [openScore, closedScore],
@@ -287,39 +310,6 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       if (e is AppException) rethrow;
       throw InferenceException('Inference error', e);
     }
-  }
-
-  /// Renders the normalized model input buffer as a small ASCII luminance grid so
-  /// the actual crop fed to the network is visible in `adb logcat`.
-  void _logAsciiThumbnail(Float32List buf) {
-    const int w = ModelConstants.inputWidth;
-    const int h = ModelConstants.inputHeight;
-    const int cols = 40;
-    const int rows = 24;
-    const int plane = w * h;
-    const String ramp = ' .:-=+*#%@';
-    final bool planar = _preprocessor.channelLayout == TensorChannelLayout.planarRgb;
-    final sb = StringBuffer('\n');
-    for (int r = 0; r < rows; r++) {
-      final int y = (r * h / rows).floor();
-      for (int c = 0; c < cols; c++) {
-        final int x = (c * w / cols).floor();
-        double rr, gg, bb;
-        if (planar) {
-          final int i = y * w + x;
-          rr = buf[i]; gg = buf[plane + i]; bb = buf[2 * plane + i];
-        } else {
-          final int i = (y * w + x) * 3;
-          rr = buf[i]; gg = buf[i + 1]; bb = buf[i + 2];
-        }
-        // De-normalize (v*128+128) -> 0..255, then to luma 0..1.
-        final double luma = ((rr + gg + bb) / 3.0 * 128.0 + 128.0) / 255.0;
-        final int idx = (luma.clamp(0.0, 1.0) * (ramp.length - 1)).round();
-        sb.write(ramp[idx]);
-      }
-      sb.write('\n');
-    }
-    AppLogger.debug(_tag, 'model-input thumbnail (${cols}x$rows):$sb');
   }
 
   Uint8List _convertFloat32ToHalfBytes(Float32List input) {

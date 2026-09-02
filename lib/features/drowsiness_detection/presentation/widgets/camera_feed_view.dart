@@ -10,6 +10,8 @@ class CameraFeedView extends StatelessWidget {
   final bool isMonitoring;
   final bool hasDriverFace;
   final bool isLowLight;
+  final bool isPowerSaverMode;
+  final VoidCallback? onTogglePowerSaver;
   final DriverAlertState alertState;
   final EyePrediction? lastPrediction;
 
@@ -20,6 +22,8 @@ class CameraFeedView extends StatelessWidget {
     required this.isMonitoring,
     this.hasDriverFace = false,
     this.isLowLight = false,
+    this.isPowerSaverMode = false,
+    this.onTogglePowerSaver,
     required this.alertState,
     this.lastPrediction,
   });
@@ -37,7 +41,7 @@ class CameraFeedView extends StatelessWidget {
             color: AppColors.alarmRedGlow,
             blurRadius: 24,
             spreadRadius: 6,
-          )
+          ),
         ];
         break;
       case DriverAlertState.drowsy:
@@ -47,7 +51,7 @@ class CameraFeedView extends StatelessWidget {
             color: AppColors.drowsyOrangeGlow,
             blurRadius: 18,
             spreadRadius: 4,
-          )
+          ),
         ];
         break;
       case DriverAlertState.watching:
@@ -57,7 +61,7 @@ class CameraFeedView extends StatelessWidget {
             color: AppColors.watchingAmberGlow,
             blurRadius: 14,
             spreadRadius: 2,
-          )
+          ),
         ];
         break;
       case DriverAlertState.normal:
@@ -68,7 +72,7 @@ class CameraFeedView extends StatelessWidget {
                   color: AppColors.normalGreenGlow,
                   blurRadius: 12,
                   spreadRadius: 2,
-                )
+                ),
               ]
             : [];
         break;
@@ -85,7 +89,60 @@ class CameraFeedView extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (isInitialized && controller != null && controller!.value.isInitialized)
+          if (isPowerSaverMode && !alertState.isAlarm)
+            // Deep OLED / AMOLED Black Screen - CameraPreview unmounted!
+            // Consumes 0W on black pixels, stops GPU OpenGL texture render & cools phone!
+            GestureDetector(
+              onTap: onTogglePowerSaver,
+              child: Container(
+                color: Colors.black,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.normalGreen.withValues(alpha: 0.15),
+                          border: Border.all(
+                            color: AppColors.normalGreen.withValues(alpha: 0.4),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.energy_savings_leaf_rounded,
+                          color: AppColors.normalGreen,
+                          size: 36,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'وضع توفير الطاقة النشط (OLED Saver)',
+                        style: TextStyle(
+                          color: AppColors.normalGreen,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'معاينة الكاميرا متوقفة لتبريد الهاتف وتوفير البطارية\nالمراقبة بالذكاء الاصطناعي والإنذار يعملان بالخلفية 100%\n(انقر في أي مكان للعودة للمعاينة المباشرة)',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 11,
+                          height: 1.4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else if (isInitialized &&
+              controller != null &&
+              controller!.value.isInitialized)
             ClipRRect(
               borderRadius: BorderRadius.circular(17),
               child: FittedBox(
@@ -113,8 +170,8 @@ class CameraFeedView extends StatelessWidget {
               ),
             ),
 
-          // Dynamic Driver Face & Eye Reticle Overlay
-          if (isMonitoring)
+          // Dynamic Driver Face & Eye Reticle Overlay (Only in live view)
+          if (isMonitoring && !isPowerSaverMode)
             Center(
               child: Container(
                 width: 220,
@@ -135,7 +192,9 @@ class CameraFeedView extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 8),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.black87,
                           borderRadius: BorderRadius.circular(12),
@@ -190,13 +249,70 @@ class CameraFeedView extends StatelessWidget {
                 ),
               ),
             ),
+          // Power Saver Toggle Button (Top Left)
+          if (isMonitoring)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onTogglePowerSaver,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isPowerSaverMode
+                            ? AppColors.normalGreen
+                            : AppColors.primaryCyan.withValues(alpha: 0.6),
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isPowerSaverMode
+                              ? Icons.visibility
+                              : Icons.energy_savings_leaf_outlined,
+                          size: 13,
+                          color: isPowerSaverMode
+                              ? AppColors.normalGreen
+                              : AppColors.primaryCyan,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          isPowerSaverMode ? 'إظهار الكاميرا' : 'توفير الطاقة',
+                          style: TextStyle(
+                            color: isPowerSaverMode
+                                ? AppColors.normalGreen
+                                : AppColors.textPrimary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Low-Light / Night Driving Warning Badge
           if (isMonitoring && isLowLight)
             Positioned(
               top: 12,
               right: 12,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black87,
                   borderRadius: BorderRadius.circular(12),
@@ -205,7 +321,11 @@ class CameraFeedView extends StatelessWidget {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.nightlight_round, size: 13, color: AppColors.watchingAmber),
+                    Icon(
+                      Icons.nightlight_round,
+                      size: 13,
+                      color: AppColors.watchingAmber,
+                    ),
                     SizedBox(width: 4),
                     Text(
                       'إضاءة خافتة (Low-Light)',
@@ -219,60 +339,100 @@ class CameraFeedView extends StatelessWidget {
                 ),
               ),
             ),
-          // Eye State Indicator under camera
+          // Eye State Indicator under camera (تم فتح العين / تم غلق العين)
           if (isMonitoring && lastPrediction != null)
             Positioned(
               bottom: 12,
-              left: 12,
-              right: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: lastPrediction!.isClosed
-                        ? AppColors.alarmRed
-                        : lastPrediction!.isOpen
-                            ? AppColors.normalGreen
-                            : AppColors.watchingAmber,
-                    width: 1.2,
+              left: 16,
+              right: 16,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      lastPrediction!.isClosed
-                          ? Icons.visibility_off
-                          : lastPrediction!.isOpen
-                              ? Icons.visibility
-                              : Icons.help_outline,
-                      size: 14,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
                       color: lastPrediction!.isClosed
                           ? AppColors.alarmRed
                           : lastPrediction!.isOpen
-                              ? AppColors.normalGreen
-                              : AppColors.watchingAmber,
+                          ? AppColors.normalGreen
+                          : AppColors.watchingAmber,
+                      width: 2.0,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      lastPrediction!.isClosed
-                          ? 'العين مغلقة'
-                          : lastPrediction!.isOpen
-                              ? 'العين مفتوحة'
-                              : 'غير محدد',
-                      style: TextStyle(
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                            (lastPrediction!.isClosed
+                                    ? AppColors.alarmRed
+                                    : lastPrediction!.isOpen
+                                    ? AppColors.normalGreen
+                                    : AppColors.watchingAmber)
+                                .withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        lastPrediction!.isClosed
+                            ? Icons.visibility_off
+                            : lastPrediction!.isOpen
+                            ? Icons.visibility
+                            : Icons.help_outline,
+                        size: 20,
                         color: lastPrediction!.isClosed
                             ? AppColors.alarmRed
                             : lastPrediction!.isOpen
-                                ? AppColors.normalGreen
-                                : AppColors.watchingAmber,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                            ? AppColors.normalGreen
+                            : AppColors.watchingAmber,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Text(
+                        lastPrediction!.isClosed
+                            ? 'تم غلق العين'
+                            : lastPrediction!.isOpen
+                            ? 'تم فتح العين'
+                            : 'جاري فحص العين...',
+                        style: TextStyle(
+                          color: lastPrediction!.isClosed
+                              ? AppColors.alarmRed
+                              : lastPrediction!.isOpen
+                              ? AppColors.normalGreen
+                              : AppColors.watchingAmber,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      if (!lastPrediction!.isUnknown) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${(lastPrediction!.confidence * 100).toStringAsFixed(0)}%',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -1,3 +1,15 @@
+/// Supported model architectures
+enum ModelArchitecture {
+  classification, // e.g. [1, 2]
+  yoloDetector,   // e.g. [1, 6300, 7]
+}
+
+/// Supported model input normalizations
+enum ModelInputNormalization {
+  zeroToOne,      // pixel / 255.0 (Standard YOLO)
+  minusOneToOne,  // (pixel - 128.0) / 128.0 (TensorFlow default)
+}
+
 /// Model constants matching the TensorFlow Lite model specification.
 class ModelConstants {
   ModelConstants._();
@@ -20,12 +32,16 @@ class ModelConstants {
   static const int outputClasses = 2;
 }
 
-/// Explicit label mapping matching Java Android reference:
-/// output[0][0] -> Open
-/// output[0][1] -> Closed
+/// Explicit label mapping:
+/// In Roboflow YOLO dataset (rmbg_all):
+/// Class 0: closedeyes
+/// Class 1: openeyes
 class ModelLabels {
   ModelLabels._();
 
   static const int open = 0;
   static const int closed = 1;
+
+  static const int yoloClosed = 0;
+  static const int yoloOpen = 1;
 }

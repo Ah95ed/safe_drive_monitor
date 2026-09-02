@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
 import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
 import 'package:safe_drive_monitor/core/services/audio_alarm_service.dart';
+import 'package:safe_drive_monitor/core/services/battery_optimization_service.dart';
 import 'package:safe_drive_monitor/core/services/haptic_service.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/camera_service.dart';
@@ -21,7 +22,6 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/camera_stream_watchdog.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/driver_face_tracker.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/drowsiness_analyzer.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/legacy_decision_analyzer.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/low_light_detector.dart';
 
 class DrowsinessDetectionProvider extends ChangeNotifier {
@@ -34,9 +34,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   final CameraStreamWatchdog _watchdog;
   final LowLightDetector _lowLightDetector;
   final DrowsinessAnalyzer _drowsinessAnalyzer;
-  final LegacyDecisionAnalyzer _legacyAnalyzer;
   final AudioAlarmService _audioAlarmService;
   final HapticService _hapticService;
+  final BatteryOptimizationService _batteryOptService;
 
   bool _disposed = false;
   bool _isInitialized = false;
@@ -44,6 +44,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   bool _isProcessingFrame = false;
   bool _isDetectingFace = false;
   bool _wasMonitoringBeforePause = false;
+  bool _isPowerSaverMode = false;
+  bool _isIgnoringBatteryOptimizations = false;
   Object? _error;
   String _statusMessage = 'جاهز لبدء المراقبة';
 
@@ -87,9 +89,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
     CameraStreamWatchdog? watchdog,
     LowLightDetector? lowLightDetector,
     DrowsinessAnalyzer? drowsinessAnalyzer,
-    LegacyDecisionAnalyzer? legacyAnalyzer,
     AudioAlarmService? audioAlarmService,
     HapticService? hapticService,
+    BatteryOptimizationService? batteryOptService,
   })  : _cameraService = cameraService ?? AppCameraService(),
         _classifier = classifier ?? TfliteEyeStateClassifier(),
         _faceDetectionService = faceDetectionService ?? MlKitFaceDetectionService(),
@@ -97,9 +99,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
         _watchdog = watchdog ?? CameraStreamWatchdog(),
         _lowLightDetector = lowLightDetector ?? LowLightDetector(),
         _drowsinessAnalyzer = drowsinessAnalyzer ?? DrowsinessAnalyzer(),
-        _legacyAnalyzer = legacyAnalyzer ?? LegacyDecisionAnalyzer(),
         _audioAlarmService = audioAlarmService ?? AppAudioAlarmService(),
-        _hapticService = hapticService ?? AppHapticService() {
+        _hapticService = hapticService ?? AppHapticService(),
+        _batteryOptService = batteryOptService ?? AppBatteryOptimizationService() {
     _syncConfigWithClassifier();
   }
 
@@ -125,7 +127,6 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       _classifier.pipeline = DetectionPipeline.faceAware;
     }
     _classifier.roiStrategy = _roiStrategy;
-    _classifier.debugRawOutput = kDebugMode;
   }
 
   // Getters
@@ -143,6 +144,29 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   DriverAlertState get alertState => _alertState;
   String get statusMessage => _statusMessage;
   Object? get error => _error;
+
+  bool get isPowerSaverMode => _isPowerSaverMode;
+  bool get isIgnoringBatteryOptimizations => _isIgnoringBatteryOptimizations;
+
+  void togglePowerSaverMode() {
+    _isPowerSaverMode = !_isPowerSaverMode;
+    AppLogger.info(_tag, 'Power Saver Mode toggled: $_isPowerSaverMode');
+    notifyListeners();
+  }
+
+  void setPowerSaverMode(bool value) {
+    if (_isPowerSaverMode != value) {
+      _isPowerSaverMode = value;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> requestIgnoreBatteryOptimizations() async {
+    final granted = await _batteryOptService.requestIgnoreBatteryOptimizations();
+    _isIgnoringBatteryOptimizations = granted;
+    notifyListeners();
+    return granted;
+  }
 
   DetectionMode get detectionMode => _detectionMode;
   DetectionPipeline get detectionPipeline => _classifier.pipeline;
@@ -168,7 +192,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   int get droppedFramesCount => _droppedFramesCount;
   int get processedFramesCount => _processedFramesCount;
   Duration get inferenceInterval => _inferenceInterval;
-  bool get isLegacyAlarmTriggered => _legacyAnalyzer.isAlarmTriggered;
+  bool get isLegacyAlarmTriggered => _alertState.isAlarm;
 
   @override
   void notifyListeners() {
@@ -185,12 +209,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await Future.wait([
+      final results = await Future.wait([
         _cameraService.initialize(lensDirection: CameraLensDirection.front),
         _classifier.load(),
+        _batteryOptService.isIgnoringBatteryOptimizations(),
       ]);
 
       if (_disposed) return;
+      _isIgnoringBatteryOptimizations = results[2] as bool;
       // Re-apply the central DrowsinessConfig thresholds + a coherent
       // preprocessing config (layout / pipeline / ROI) to the classifier.
       _syncConfigWithClassifier();
@@ -208,21 +234,15 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
     }
   }
 
-  /// Start real-time image analysis stream with Watchdog monitor.
+  /// Start monitoring and camera stream.
   Future<void> startMonitoring() async {
-    if (_disposed) return;
-    if (!_isInitialized) {
-      await initialize();
-      if (!_isInitialized || _disposed) return;
-    }
-    if (_isMonitoring) return;
+    if (_isMonitoring || !_isInitialized) return;
 
     try {
       _error = null;
       _isMonitoring = true;
       _statusMessage = 'جاري مراقبة حالة السائق...';
       _drowsinessAnalyzer.reset();
-      _legacyAnalyzer.reset();
       _faceTracker.reset();
       _currentDriverFace = null;
       _droppedFramesCount = 0;
@@ -258,7 +278,6 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       await _cameraService.stopImageStream();
       await _stopAlarmFeedback();
       _drowsinessAnalyzer.reset();
-      _legacyAnalyzer.reset();
       _faceTracker.reset();
       _currentDriverFace = null;
       _alertState = DriverAlertState.normal;
@@ -311,9 +330,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       return;
     }
 
-    // 1. Asynchronous throttled Face Detection (~3.5 Hz)
+    // 1. Asynchronous throttled Face Detection:
+    // When face is active and tracked, throttle to ~1 Hz (900ms) to cool CPU & save battery.
+    // When seeking face, run at ~3.5 Hz (280ms) for fast acquisition.
+    final Duration dynamicFaceInterval = _faceTracker.isDriverFaceActive(now)
+        ? const Duration(milliseconds: 900)
+        : _faceDetectionInterval;
     if (!_isDetectingFace &&
-        now.difference(_lastFaceDetectionTimestamp) >= _faceDetectionInterval) {
+        now.difference(_lastFaceDetectionTimestamp) >= dynamicFaceInterval) {
       _runFaceDetection(image, now);
     }
 
@@ -367,10 +391,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
 
       _inferenceTime = prediction.inferenceTime;
 
-      // 2. Legacy comparison analysis (debug)
-      _legacyAnalyzer.processPrediction(prediction);
-
-      // 3. Time-based Drowsiness State Machine Analysis (with PERCLOS and Head Nod)
+      // 2. Time-based Drowsiness State Machine Analysis (with PERCLOS and Head Nod)
       final analysisResult = _drowsinessAnalyzer.processPrediction(
         prediction,
         driverFace: _currentDriverFace,
@@ -394,24 +415,30 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       if (kDebugMode) {
         if (prediction.isClosed) {
           debugPrint(
-            '🙈 [EYE_STATUS] تم غلق العين (Eyes CLOSED) | '
-            'Closed: ${(prediction.closedScore * 100).toStringAsFixed(1)}% | '
-            'Open: ${(prediction.openScore * 100).toStringAsFixed(1)}% | '
+            '🙈 [LOGCAT] تم غلق العين (Eyes CLOSED) | '
+            'ثقة الإغلاق: ${(prediction.closedScore * 100).toStringAsFixed(1)}% | '
+            'ثقة الفتح: ${(prediction.openScore * 100).toStringAsFixed(1)}% | '
             'PERCLOS: ${perclosPercentage.toStringAsFixed(1)}% | '
-            'Alert: ${_alertState.name.toUpperCase()}',
+            'الحالة: ${_alertState.name.toUpperCase()}',
           );
         } else if (prediction.isOpen) {
           debugPrint(
-            '👁️ [EYE_STATUS] تم فتح العين (Eyes OPEN) | '
-            'Open: ${(prediction.openScore * 100).toStringAsFixed(1)}% | '
-            'Closed: ${(prediction.closedScore * 100).toStringAsFixed(1)}% | '
+            '👁️ [LOGCAT] تم فتح العين (Eyes OPEN) | '
+            'ثقة الفتح: ${(prediction.openScore * 100).toStringAsFixed(1)}% | '
+            'ثقة الإغلاق: ${(prediction.closedScore * 100).toStringAsFixed(1)}% | '
             'PERCLOS: ${perclosPercentage.toStringAsFixed(1)}%',
           );
+        } else {
+          debugPrint('🔍 [LOGCAT] حالة العين: جاري فحص العينين...');
         }
       }
 
       // 5. Handle audio and vibration alarms
       if (analysisResult.shouldTriggerAlarm) {
+        if (_isPowerSaverMode) {
+          _isPowerSaverMode = false;
+          notifyListeners();
+        }
         if (kDebugMode) {
           debugPrint('🚨🚨🚨 [ALARM] إنذار! تم اكتشاف نوم السائق! تشغيل صوت التنبيه والاهتزاز! 🚨🚨🚨');
         }

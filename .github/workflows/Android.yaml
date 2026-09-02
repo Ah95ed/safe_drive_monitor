@@ -3,14 +3,14 @@ name: Safe Drive CI/CD
 on:
   push:
     tags:
-      - "v*"   # يشتغل عند رفع تاغ مثل v1.0.0
+      - "v*" # يشتغل عند رفع تاغ مثل v1.0.0
 
 jobs:
   build_android:
     name: APK Build
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # ضرورية لإنشاء Release
+      contents: write # ضرورية لإنشاء Release
 
     steps:
       - name: Checkout code
@@ -59,3 +59,11 @@ jobs:
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+#           git add .github/workflows/android.yaml
+# git commit -m "fix: correct keystore relative path"
+# git push origin main
+# git tag -d v1.0.0
+# git push origin :refs/tags/v1.0.0
+# git tag v1.0.0
+# git push origin v1.0.0

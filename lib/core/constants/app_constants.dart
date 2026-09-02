@@ -10,8 +10,8 @@ class AppConstants {
   static const ResolutionPreset defaultCameraResolution =
       ResolutionPreset.medium;
 
-  /// High-speed inference interval (~15 frames/sec) for instantaneous eye detection.
-  static const Duration defaultInferenceInterval = Duration(milliseconds: 65);
+  /// Balanced Eco inference interval (~4.5 FPS) in normal driving, saving battery & cooling device.
+  static const Duration defaultInferenceInterval = Duration(milliseconds: 220);
 
   /// Disclaimer displayed to driver on startup.
   static const String safetyDisclaimerText =

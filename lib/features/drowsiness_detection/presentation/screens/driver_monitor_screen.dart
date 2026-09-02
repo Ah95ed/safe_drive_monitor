@@ -68,6 +68,21 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
               ],
             ),
             actions: [
+              if (provider.isMonitoring)
+                IconButton(
+                  icon: Icon(
+                    provider.isPowerSaverMode
+                        ? Icons.energy_savings_leaf
+                        : Icons.energy_savings_leaf_outlined,
+                    color: provider.isPowerSaverMode
+                        ? AppColors.normalGreen
+                        : AppColors.primaryCyan,
+                  ),
+                  tooltip: provider.isPowerSaverMode
+                      ? 'وضع توفير الطاقة مفعّل'
+                      : 'تفعيل وضع توفير الطاقة (OLED Saver)',
+                  onPressed: provider.togglePowerSaverMode,
+                ),
               IconButton(
                 icon: const Icon(Icons.speed_rounded, color: AppColors.primaryCyan),
                 tooltip: 'وضع القيادة المظلمة (HUD Mode)',
@@ -102,6 +117,60 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          // Battery Optimization Exemption Banner
+                          if (!provider.isIgnoringBatteryOptimizations)
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: AppColors.watchingAmber.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppColors.watchingAmber.withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.battery_alert_rounded,
+                                    color: AppColors.watchingAmber,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'لضمان استمرار المراقبة دون إيقاف بالخلفية، اسمح للتطبيق بتجاوز قيود البطارية.',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textPrimary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  TextButton(
+                                    onPressed: provider.requestIgnoreBatteryOptimizations,
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      backgroundColor: AppColors.watchingAmber.withValues(alpha: 0.25),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'استثناء',
+                                      style: TextStyle(
+                                        color: AppColors.watchingAmber,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
                           // Alert Banner Overlay
                           AlertBannerOverlay(
                             alertState: provider.alertState,
@@ -118,6 +187,8 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
                                isMonitoring: provider.isMonitoring,
                                hasDriverFace: provider.hasValidDriverFace,
                                isLowLight: provider.isLowLight,
+                               isPowerSaverMode: provider.isPowerSaverMode,
+                               onTogglePowerSaver: provider.togglePowerSaverMode,
                                alertState: provider.alertState,
                                lastPrediction: provider.lastPrediction,
                              ),

@@ -18,21 +18,32 @@ class ImagePreprocessor {
   DetectionPipeline pipeline;
   RoiStrategy roiStrategy;
   bool useDirectFastPipeline;
+  ModelInputNormalization normalization;
 
-  // Reusable Float32List buffer for model inputs (224 * 224 * 3 = 150,528 floats)
-  final Float32List _inputBuffer =
+  int _inputWidth = ModelConstants.inputWidth;
+  int _inputHeight = ModelConstants.inputHeight;
+
+  // Reusable Float32List buffer for model inputs
+  Float32List _inputBuffer =
       Float32List(ModelConstants.totalInputFloats);
 
   ImagePreprocessor({
-    // A standard [1,224,224,3] TFLite tensor is channels-last (HWC), i.e.
+    // A standard [1,224,224,3] or [1,320,320,3] TFLite tensor is channels-last (HWC), i.e.
     // interleaved RGB. Planar is only for byte-parity with the legacy Java path.
     this.channelLayout = TensorChannelLayout.interleavedRgb,
-    // Geometric default is a plain center crop; the provider switches this to
-    // faceAware for the improved pipeline via _applyDetectionModeConfig().
     this.pipeline = DetectionPipeline.legacyCenterCrop,
     this.roiStrategy = RoiStrategy.eyeBand,
     this.useDirectFastPipeline = true,
+    this.normalization = ModelInputNormalization.zeroToOne,
   });
+
+  void setInputDimensions(int width, int height) {
+    if (_inputWidth != width || _inputHeight != height) {
+      _inputWidth = width;
+      _inputHeight = height;
+      _inputBuffer = Float32List(_inputWidth * _inputHeight * 3);
+    }
+  }
 
   /// Converts a [CameraImage] and fills the normalized Float32 input buffer.
   /// Uses zero-allocation direct ROI sampling by default for maximum performance.
@@ -119,10 +130,10 @@ class ImagePreprocessor {
       }
     }
 
-    // 2. Direct Sub-sampling loop (224x224 grid)
-    const int outWidth = ModelConstants.inputWidth;   // 224
-    const int outHeight = ModelConstants.inputHeight; // 224
-    const int planeSize = outWidth * outHeight;       // 50,176
+    // 2. Direct Sub-sampling loop
+    final int outWidth = _inputWidth;
+    final int outHeight = _inputHeight;
+    final int planeSize = outWidth * outHeight;
 
     final double stepX = roiWidth / outWidth;
     final double stepY = roiHeight / outHeight;
@@ -143,6 +154,7 @@ class ImagePreprocessor {
         sensorRotation: sensorRotation,
         isMirrored: isMirrored,
         isPlanar: activeLayout == TensorChannelLayout.planarRgb,
+        normalization: normalization,
       );
     } else {
       // YUV420_888 & NV21
@@ -161,6 +173,7 @@ class ImagePreprocessor {
         sensorRotation: sensorRotation,
         isMirrored: isMirrored,
         isPlanar: activeLayout == TensorChannelLayout.planarRgb,
+        normalization: normalization,
       );
     }
 
@@ -182,6 +195,7 @@ class ImagePreprocessor {
     required int sensorRotation,
     required bool isMirrored,
     required bool isPlanar,
+    required ModelInputNormalization normalization,
   }) {
     final Plane yPlane = cameraImage.planes[0];
     final Plane uPlane = cameraImage.planes[1];
@@ -195,6 +209,8 @@ class ImagePreprocessor {
     final int uRowStride = uPlane.bytesPerRow;
     final int uPixelStride = uPlane.bytesPerPixel ?? 1;
     final int vPixelStride = vPlane.bytesPerPixel ?? 1;
+
+    final bool isZeroToOne = normalization == ModelInputNormalization.zeroToOne;
 
     int pixelIndex = 0;
 
@@ -246,10 +262,10 @@ class ImagePreprocessor {
         final int g = (yVal - ((352 * uVal + 731 * vVal) >> 10)).clamp(0, 255);
         final int b = (yVal + ((1814 * uVal) >> 10)).clamp(0, 255);
 
-        // Normalize (pixel - 128) / 128 into buffer
-        final double normR = (r - 128.0) / 128.0;
-        final double normG = (g - 128.0) / 128.0;
-        final double normB = (b - 128.0) / 128.0;
+        // Normalize into buffer (zeroToOne for YOLO [0,1], minusOneToOne for TF [-1,1])
+        final double normR = isZeroToOne ? (r / 255.0) : ((r - 128.0) / 128.0);
+        final double normG = isZeroToOne ? (g / 255.0) : ((g - 128.0) / 128.0);
+        final double normB = isZeroToOne ? (b / 255.0) : ((b - 128.0) / 128.0);
 
         if (isPlanar) {
           buffer[pixelIndex] = normR;
@@ -282,10 +298,13 @@ class ImagePreprocessor {
     required int sensorRotation,
     required bool isMirrored,
     required bool isPlanar,
+    required ModelInputNormalization normalization,
   }) {
     final Plane bgraPlane = cameraImage.planes[0];
     final Uint8List bytes = bgraPlane.bytes;
     final int rowStride = bgraPlane.bytesPerRow;
+
+    final bool isZeroToOne = normalization == ModelInputNormalization.zeroToOne;
 
     int pixelIndex = 0;
 
@@ -325,9 +344,10 @@ class ImagePreprocessor {
         final int g = bytes[byteIndex + 1];
         final int r = bytes[byteIndex + 2];
 
-        final double normR = (r - 128.0) / 128.0;
-        final double normG = (g - 128.0) / 128.0;
-        final double normB = (b - 128.0) / 128.0;
+        // Normalize (zeroToOne for YOLO [0,1], minusOneToOne for TF [-1,1])
+        final double normR = isZeroToOne ? (r / 255.0) : ((r - 128.0) / 128.0);
+        final double normG = isZeroToOne ? (g / 255.0) : ((g - 128.0) / 128.0);
+        final double normB = isZeroToOne ? (b / 255.0) : ((b - 128.0) / 128.0);
 
         if (isPlanar) {
           buffer[pixelIndex] = normR;
@@ -441,21 +461,25 @@ class ImagePreprocessor {
     }
 
     // 4. Extract RGB and normalize into Float32 buffer
-    final int width = ModelConstants.inputWidth;
-    final int height = ModelConstants.inputHeight;
-    final int planeSize = width * height; // 50,176
+    final int width = _inputWidth;
+    final int height = _inputHeight;
+    final int planeSize = width * height;
 
     const double mean = ModelConstants.imageMean;
     const double std = ModelConstants.imageStd;
+    final bool isZeroToOne = normalization == ModelInputNormalization.zeroToOne;
 
     if (activeLayout == TensorChannelLayout.planarRgb) {
       int pixelIndex = 0;
       for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
           final pixel = processed.getPixel(x, y);
-          buffer[pixelIndex] = (pixel.r - mean) / std;
-          buffer[planeSize + pixelIndex] = (pixel.g - mean) / std;
-          buffer[2 * planeSize + pixelIndex] = (pixel.b - mean) / std;
+          final double r = isZeroToOne ? (pixel.r / 255.0) : ((pixel.r - mean) / std);
+          final double g = isZeroToOne ? (pixel.g / 255.0) : ((pixel.g - mean) / std);
+          final double b = isZeroToOne ? (pixel.b / 255.0) : ((pixel.b - mean) / std);
+          buffer[pixelIndex] = r;
+          buffer[planeSize + pixelIndex] = g;
+          buffer[2 * planeSize + pixelIndex] = b;
           pixelIndex++;
         }
       }
@@ -464,9 +488,12 @@ class ImagePreprocessor {
       for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
           final pixel = processed.getPixel(x, y);
-          buffer[bufferIndex++] = (pixel.r - mean) / std;
-          buffer[bufferIndex++] = (pixel.g - mean) / std;
-          buffer[bufferIndex++] = (pixel.b - mean) / std;
+          final double r = isZeroToOne ? (pixel.r / 255.0) : ((pixel.r - mean) / std);
+          final double g = isZeroToOne ? (pixel.g / 255.0) : ((pixel.g - mean) / std);
+          final double b = isZeroToOne ? (pixel.b / 255.0) : ((pixel.b - mean) / std);
+          buffer[bufferIndex++] = r;
+          buffer[bufferIndex++] = g;
+          buffer[bufferIndex++] = b;
         }
       }
     }

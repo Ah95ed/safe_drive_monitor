@@ -51,8 +51,8 @@ class DrowsinessConfig {
     this.perclosAlarmThreshold = 0.25,
     this.headNodPitchThreshold = -20.0,
     this.enableAdaptiveInference = true,
-    this.normalInferenceInterval = const Duration(milliseconds: 160),
-    this.alertInferenceInterval = const Duration(milliseconds: 60),
+    this.normalInferenceInterval = const Duration(milliseconds: 220),
+    this.alertInferenceInterval = const Duration(milliseconds: 90),
   });
 
   DrowsinessConfig copyWith({
