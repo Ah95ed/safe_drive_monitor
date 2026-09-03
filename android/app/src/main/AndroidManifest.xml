@@ -43,6 +43,13 @@
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="face" />
+
+        <!-- Foreground Camera Service for Continuous Driver Monitoring (API 24 - 37) -->
+        <service
+            android:name=".DriverMonitoringService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="camera" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -38,3 +38,28 @@ class InferenceException extends AppException {
 class AudioAlarmException extends AppException {
   const AudioAlarmException(super.message, [super.cause]);
 }
+
+/// Thrown when starting, stopping or communicating with the Android Foreground Service fails.
+class ForegroundServiceException extends AppException {
+  const ForegroundServiceException(super.message, [super.cause]);
+}
+
+/// Thrown when lighting measurement or exposure adaptation fails.
+class LightingException extends AppException {
+  const LightingException(super.message, [super.cause]);
+}
+
+/// Thrown when checking or requesting battery optimization exemption fails.
+class BatteryOptimizationException extends AppException {
+  const BatteryOptimizationException(super.message, [super.cause]);
+}
+
+/// Thrown when the watchdog fails to recover the monitoring pipeline.
+class MonitoringRecoveryException extends AppException {
+  const MonitoringRecoveryException(super.message, [super.cause]);
+}
+
+/// Thrown when thermal throttling severely impairs monitoring safety.
+class ThermalException extends AppException {
+  const ThermalException(super.message, [super.cause]);
+}

@@ -9,12 +9,17 @@ abstract class CameraService {
   bool get isInitialized;
   bool get isStreaming;
   int get sensorOrientation;
+  double get minExposureOffset;
+  double get maxExposureOffset;
+  double get exposureStepSize;
+  double get currentExposureOffset;
 
   Future<void> initialize({
     CameraLensDirection lensDirection = CameraLensDirection.front,
   });
   Future<void> startImageStream(void Function(CameraImage image) onImage);
   Future<void> stopImageStream();
+  Future<double> setExposureOffset(double offset);
   Future<void> dispose();
 }
 
@@ -24,6 +29,10 @@ class AppCameraService implements CameraService {
   CameraController? _controller;
   bool _isStreaming = false;
   int _sensorOrientation = 0;
+  double _minExposureOffset = 0.0;
+  double _maxExposureOffset = 0.0;
+  double _exposureStepSize = 0.0;
+  double _currentExposureOffset = 0.0;
 
   @override
   CameraController? get controller => _controller;
@@ -37,6 +46,18 @@ class AppCameraService implements CameraService {
 
   @override
   int get sensorOrientation => _sensorOrientation;
+
+  @override
+  double get minExposureOffset => _minExposureOffset;
+
+  @override
+  double get maxExposureOffset => _maxExposureOffset;
+
+  @override
+  double get exposureStepSize => _exposureStepSize;
+
+  @override
+  double get currentExposureOffset => _currentExposureOffset;
 
   @override
   Future<void> initialize({
@@ -70,6 +91,20 @@ class AppCameraService implements CameraService {
       await controller.initialize();
       _controller = controller;
 
+      // Query hardware exposure limits
+      try {
+        _minExposureOffset = await controller.getMinExposureOffset();
+        _maxExposureOffset = await controller.getMaxExposureOffset();
+        _exposureStepSize = await controller.getExposureOffsetStepSize();
+        _currentExposureOffset = 0.0;
+        AppLogger.info(
+          _tag,
+          'Exposure capabilities: min=$_minExposureOffset, max=$_maxExposureOffset, step=$_exposureStepSize',
+        );
+      } catch (e) {
+        AppLogger.warning(_tag, 'Notice: Exposure offsets not supported on this device/camera: $e');
+      }
+
       AppLogger.info(
         _tag,
         'Camera initialized: ${selectedCamera.lensDirection.name}, rotation: $_sensorOrientation',
@@ -78,6 +113,23 @@ class AppCameraService implements CameraService {
       AppLogger.error(_tag, 'Camera initialization failed', e, st);
       if (e is AppException) rethrow;
       throw CameraInitializationException('خطأ في تهيئة الكاميرا', e);
+    }
+  }
+
+  @override
+  Future<double> setExposureOffset(double offset) async {
+    if (!isInitialized) return _currentExposureOffset;
+    if (_minExposureOffset == _maxExposureOffset) return _currentExposureOffset;
+
+    try {
+      final clamped = offset.clamp(_minExposureOffset, _maxExposureOffset);
+      final applied = await _controller!.setExposureOffset(clamped);
+      _currentExposureOffset = applied;
+      AppLogger.info(_tag, 'Applied exposure offset: $applied');
+      return applied;
+    } catch (e) {
+      AppLogger.warning(_tag, 'Error setting exposure offset ($offset): $e');
+      return _currentExposureOffset;
     }
   }
 

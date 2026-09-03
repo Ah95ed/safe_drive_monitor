@@ -3,6 +3,7 @@ import 'package:vibration/vibration.dart';
 
 abstract class HapticService {
   Future<void> startAlarmHaptic();
+  Future<void> playWarningHaptic();
   Future<void> stopAlarmHaptic();
   Future<void> dispose();
 }
@@ -18,12 +19,26 @@ class AppHapticService implements HapticService {
       final hasVibrator = await Vibration.hasVibrator();
       if (hasVibrator == true) {
         _isVibrating = true;
-        // Pulse pattern: wait 500ms, vibrate 1000ms, repeat
-        await Vibration.vibrate(pattern: [500, 1000], repeat: 0);
+        // Pulse pattern: wait 400ms, vibrate 900ms, repeat
+        await Vibration.vibrate(pattern: [400, 900], repeat: 0);
         AppLogger.info(_tag, 'Alarm haptic vibration started.');
       }
     } catch (e) {
       AppLogger.warning(_tag, 'Vibration not supported or failed: $e');
+    }
+  }
+
+  @override
+  Future<void> playWarningHaptic() async {
+    try {
+      final hasVibrator = await Vibration.hasVibrator();
+      if (hasVibrator == true) {
+        // Distinct short triple-buzz for technical degradation/warnings
+        await Vibration.vibrate(pattern: [0, 150, 100, 150, 100, 300]);
+        AppLogger.info(_tag, 'Technical warning haptic played.');
+      }
+    } catch (e) {
+      AppLogger.warning(_tag, 'Warning vibration failed: $e');
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 
 abstract class AudioAlarmService {
   Future<void> playAlarm();
+  Future<void> playTechnicalWarning();
   Future<void> stopAlarm();
   Future<void> dispose();
   bool get isPlaying;
@@ -62,6 +63,20 @@ class AppAudioAlarmService implements AudioAlarmService {
     } catch (e, st) {
       _isPlaying = false;
       AppLogger.error(_tag, 'Failed to play alarm audio', e, st);
+    }
+  }
+
+  @override
+  Future<void> playTechnicalWarning() async {
+    try {
+      await _configureAudioContext();
+      // Plays once at moderate volume (distinct from screaming continuous drowsiness alarm)
+      await _player.setReleaseMode(ReleaseMode.stop);
+      await _player.setVolume(0.65);
+      await _player.play(AssetSource(AppConstants.technicalWarningSoundAsset));
+      AppLogger.info(_tag, 'Technical warning tone triggered.');
+    } catch (e, st) {
+      AppLogger.error(_tag, 'Failed to play technical warning tone', e, st);
     }
   }
 
