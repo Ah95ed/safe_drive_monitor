@@ -36,44 +36,9 @@ class DrowsinessAnalyzer {
   final PerclosCalculator _perclosCalculator;
 
   DriverAlertState _currentState = DriverAlertState.normal;
-  DateTime? _firstClosedTimestamp;
-  DateTime? _firstOpenTimestamp;
-  DateTime? _recoveryStartTimestamp;
+  DateTime? _closedStartedAt;
+  DateTime? _openStartedAt;
   bool _isAlarmPlaying = false;
-
-  // --- Temporal smoothing (PHASE 7) --------------------------------------
-  // The eye model can be noisy near the decision boundary. Debounce isolated
-  // flips: a new state must be seen on [_debounceFrames] consecutive readings
-  // (or once at high confidence) before it is accepted. This costs at most one
-  // extra frame of latency, far below the watching/alarm thresholds, so it
-  // does not meaningfully delay a real alarm.
-  static const int _debounceFrames = 2;
-  static const double _highConfidenceFastSwitch = 0.80;
-  EyeState _stableEyeState = EyeState.open;
-  EyeState _candidateEyeState = EyeState.open;
-  int _candidateStreak = 0;
-
-  EyeState _debounceEyeState(EyePrediction prediction) {
-    if (prediction.isUnknown) return _stableEyeState;
-    if (prediction.state == _stableEyeState) {
-      _candidateEyeState = _stableEyeState;
-      _candidateStreak = 0;
-      return _stableEyeState;
-    }
-    if (prediction.state == _candidateEyeState) {
-      _candidateStreak++;
-    } else {
-      _candidateEyeState = prediction.state;
-      _candidateStreak = 1;
-    }
-    final int needed =
-        prediction.confidence >= _highConfidenceFastSwitch ? 1 : _debounceFrames;
-    if (_candidateStreak >= needed) {
-      _stableEyeState = _candidateEyeState;
-      _candidateStreak = 0;
-    }
-    return _stableEyeState;
-  }
 
   DrowsinessAnalyzer({
     this.config = const DrowsinessConfig(),
@@ -90,60 +55,55 @@ class DrowsinessAnalyzer {
   bool get isAlarmActive => _isAlarmPlaying;
   double get currentPerclos => _perclosCalculator.currentPerclos;
   double get currentPerclosPercentage => _perclosCalculator.currentPerclosPercentage;
+  DateTime? get closedStartedAt => _closedStartedAt;
+  DateTime? get openStartedAt => _openStartedAt;
 
   /// Resets the analyzer state and PERCLOS rolling window.
   void reset() {
     _currentState = DriverAlertState.normal;
-    _firstClosedTimestamp = null;
-    _firstOpenTimestamp = null;
-    _recoveryStartTimestamp = null;
+    _closedStartedAt = null;
+    _openStartedAt = null;
     _isAlarmPlaying = false;
-    _stableEyeState = EyeState.open;
-    _candidateEyeState = EyeState.open;
-    _candidateStreak = 0;
     _perclosCalculator.reset();
   }
 
-  /// Processes an [EyePrediction] with optional [DriverFace] pose.
+  /// Processes an [EyePrediction] with optional [DriverFace] pose and custom timestamp [now].
   DrowsinessAnalysisResult processPrediction(
     EyePrediction prediction, {
     DriverFace? driverFace,
+    DateTime? now,
   }) {
-    final now = prediction.timestamp;
-
-    // Filter out unknown predictions
-    if (prediction.isUnknown) {
-      return _buildResult(
-        continuousClosed: _calculateDuration(_firstClosedTimestamp, now),
-        continuousOpen: _calculateDuration(_firstOpenTimestamp, now),
-        perclos: currentPerclos,
-        message: 'جاري التحقق من وضوح الصورة...',
-      );
-    }
-
-    // Update rolling PERCLOS window
-    final perclos = _perclosCalculator.addPrediction(prediction);
+    final currentNow = now ?? prediction.timestamp;
 
     // Check head nod (pitch < threshold)
     final double? pitch = driverFace?.headEulerAngleX;
     final bool isHeadNodding = pitch != null && pitch < config.headNodPitchThreshold;
 
-    // Temporal smoothing: act on the debounced eye state, not the raw frame.
-    final EyeState effectiveState = _debounceEyeState(prediction);
+    // 1. UNKNOWN prediction handling (Requirement 6: UNKNOWN does NOT mean OPEN)
+    if (prediction.isUnknown) {
+      // Keep current alarm state until confident OPEN or CLOSED is observed
+      return _buildResult(
+        continuousClosed: _calculateDuration(_closedStartedAt, currentNow),
+        continuousOpen: _calculateDuration(_openStartedAt, currentNow),
+        perclos: currentPerclos,
+        isHeadNod: isHeadNodding,
+        shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+        shouldStopAlarm: false,
+        message: 'جاري التحقق من وضوح الصورة...',
+      );
+    }
 
-    if (effectiveState == EyeState.closed) {
-      // Driver closed eyes
-      _firstOpenTimestamp = null;
-      _recoveryStartTimestamp = null; // Interrupt ongoing recovery
+    // Update rolling PERCLOS window for valid predictions
+    final perclos = _perclosCalculator.addPrediction(prediction);
 
-      _firstClosedTimestamp ??= now;
-      final closedDuration = now.difference(_firstClosedTimestamp!);
+    // 2. CLOSED eye handling (Requirement 5 & 7)
+    if (prediction.state == EyeState.closed) {
+      // Driver closed eyes: immediately cancel any pending recovery
+      _openStartedAt = null;
 
-      // Loud alarm is driven by *instantaneous* eye closure only (PHASE 7):
-      //   Condition 1: prolonged continuous eye closure (>= alarmThreshold)
-      //   Condition 2: head nodding forward together with a sustained closure
-      // PERCLOS is a gradual fatigue support signal; on its own it only
-      // escalates to `drowsy`, it never triggers the loud alarm in this phase.
+      _closedStartedAt ??= currentNow;
+      final closedDuration = currentNow.difference(_closedStartedAt!);
+
       final bool isProlongedClosed = closedDuration >= config.alarmThreshold;
       final bool isNodWithClosed = isHeadNodding && closedDuration >= config.watchingThreshold;
 
@@ -151,10 +111,9 @@ class DrowsinessAnalyzer {
         _currentState = DriverAlertState.alarm;
         _isAlarmPlaying = true;
 
-        String msg = '🚨 انتبه! تم اكتشاف نوم أثناء القيادة!';
-        if (isNodWithClosed && !isProlongedClosed) {
-          msg = '🚨 انتبه! تم اكتشاف انحناء رأس ونوم السائق!';
-        }
+        final String msg = isNodWithClosed && !isProlongedClosed
+            ? '🚨 انتبه! تم اكتشاف انحناء رأس ونوم السائق!'
+            : '🚨 انتبه! تم اكتشاف نوم أثناء القيادة!';
 
         return _buildResult(
           continuousClosed: closedDuration,
@@ -162,6 +121,7 @@ class DrowsinessAnalyzer {
           perclos: perclos,
           isHeadNod: isHeadNodding,
           shouldTriggerAlarm: true,
+          shouldStopAlarm: false,
           message: msg,
         );
       } else if (closedDuration >= config.drowsyThreshold || _perclosCalculator.isWarningLevel) {
@@ -173,6 +133,8 @@ class DrowsinessAnalyzer {
           continuousOpen: Duration.zero,
           perclos: perclos,
           isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldStopAlarm: false,
           message: '⚠️ تحذير: علامات نعاس وإجهاد!',
         );
       } else if (closedDuration >= config.watchingThreshold) {
@@ -185,6 +147,8 @@ class DrowsinessAnalyzer {
           continuousOpen: Duration.zero,
           perclos: perclos,
           isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldStopAlarm: false,
           message: 'مراقبة العينين...',
         );
       } else {
@@ -194,31 +158,47 @@ class DrowsinessAnalyzer {
           continuousOpen: Duration.zero,
           perclos: perclos,
           isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldStopAlarm: false,
           message: 'رمش طبيعي',
         );
       }
     } else {
-      // Driver opened eyes (EyeState.open)
-      _firstClosedTimestamp = null;
-      _firstOpenTimestamp ??= now;
-      final openDuration = now.difference(_firstOpenTimestamp!);
+      // 3. OPEN eye handling (Requirement 5)
+      // Check confidence threshold: if below minimumOpenConfidence, do NOT count as recovery
+      if (prediction.confidence < config.minimumOpenConfidence) {
+        return _buildResult(
+          continuousClosed: _calculateDuration(_closedStartedAt, currentNow),
+          continuousOpen: _calculateDuration(_openStartedAt, currentNow),
+          perclos: perclos,
+          isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldStopAlarm: false,
+          message: 'جاري تأكيد حالة العينين...',
+        );
+      }
 
-      // If alarm is currently active, require sustained open state for recoveryThreshold (1000ms)
+      // Valid open eye prediction
+      _closedStartedAt = null;
+
+      // If alarm is currently active, require continuous open state for recoveryThreshold (900ms)
       if (_currentState == DriverAlertState.alarm || _isAlarmPlaying) {
-        _recoveryStartTimestamp ??= now;
-        final recoveryDuration = now.difference(_recoveryStartTimestamp!);
+        _openStartedAt ??= currentNow;
+        final openDuration = currentNow.difference(_openStartedAt!);
 
-        // Recovery depends only on sustained continuous OPEN eyes (PHASE 1/3).
-        if (recoveryDuration >= config.recoveryThreshold) {
-          // Successfully recovered from alarm
+        if (openDuration >= config.recoveryThreshold) {
+          // Successfully recovered from alarm!
           _currentState = DriverAlertState.normal;
           _isAlarmPlaying = false;
-          _recoveryStartTimestamp = null;
+          _closedStartedAt = null;
+          _openStartedAt = null;
+
           return _buildResult(
             continuousClosed: Duration.zero,
             continuousOpen: openDuration,
             perclos: perclos,
             isHeadNod: isHeadNodding,
+            shouldTriggerAlarm: false,
             shouldStopAlarm: true,
             message: 'تم استعادة الانتباه - العينان مفتوحتان',
           );
@@ -229,11 +209,16 @@ class DrowsinessAnalyzer {
             continuousOpen: openDuration,
             perclos: perclos,
             isHeadNod: isHeadNodding,
+            shouldTriggerAlarm: true,
+            shouldStopAlarm: false,
             message: 'جاري تأكيد استيقاظ السائق...',
           );
         }
       } else {
         // Normal open state
+        _openStartedAt ??= currentNow;
+        final openDuration = currentNow.difference(_openStartedAt!);
+
         _currentState = _perclosCalculator.isWarningLevel
             ? DriverAlertState.drowsy
             : DriverAlertState.normal;
@@ -243,6 +228,8 @@ class DrowsinessAnalyzer {
           continuousOpen: openDuration,
           perclos: perclos,
           isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: false,
+          shouldStopAlarm: false,
           message: _currentState == DriverAlertState.drowsy
               ? '⚠️ تحذير: مستوى إجهاد مرتفع (PERCLOS)'
               : 'السائق مستيقظ',

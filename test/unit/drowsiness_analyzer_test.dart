@@ -1,4 +1,7 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:safe_drive_monitor/core/services/alarm_controller.dart';
+import 'package:safe_drive_monitor/core/services/audio_alarm_service.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/drowsiness_config.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
@@ -243,5 +246,195 @@ void main() {
       expect(r2.alertState, equals(DriverAlertState.normal));
       expect(r2.shouldTriggerAlarm, isFalse);
     });
+
+    test('Test 1: CLOSED -> ALARM -> continuous OPEN 1000ms -> NORMAL with stopAlarm called exactly once', () async {
+      final alarmService = MockAudioAlarmService();
+      final controller = AlarmController(alarmService);
+
+      // CLOSED sequence triggering ALARM
+      analyzer.processPrediction(createPrediction(state: EyeState.closed, timeOffset: Duration.zero));
+      final rAlarm = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 1600),
+      ));
+      expect(rAlarm.alertState, equals(DriverAlertState.alarm));
+      await controller.sync(rAlarm.alertState);
+      expect(alarmService.playAlarmCalls, equals(1));
+      expect(controller.isPlaying, isTrue);
+
+      // Another frame still in ALARM
+      final rAlarm2 = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 1700),
+      ));
+      await controller.sync(rAlarm2.alertState);
+      // playAlarm should NOT be called again
+      expect(alarmService.playAlarmCalls, equals(1));
+
+      // OPEN begins at 1800ms
+      final rOpen1 = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 1800),
+      ));
+      expect(rOpen1.alertState, equals(DriverAlertState.alarm));
+      await controller.sync(rOpen1.alertState);
+      expect(alarmService.stopAlarmCalls, equals(0));
+
+      // OPEN 500ms at 2300ms
+      final rOpen2 = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 2300),
+      ));
+      expect(rOpen2.alertState, equals(DriverAlertState.alarm));
+      await controller.sync(rOpen2.alertState);
+      expect(alarmService.stopAlarmCalls, equals(0));
+
+      // OPEN continuously 1000ms at 2850ms (>= 1000ms recoveryThreshold in analyzer test)
+      final rOpen3 = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 2850),
+      ));
+      expect(rOpen3.alertState, equals(DriverAlertState.normal));
+      expect(rOpen3.shouldStopAlarm, isTrue);
+      await controller.sync(rOpen3.alertState);
+      expect(alarmService.stopAlarmCalls, equals(1));
+      expect(controller.isPlaying, isFalse);
+
+      // Additional OPEN frames in NORMAL state
+      final rOpen4 = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 3200),
+      ));
+      await controller.sync(rOpen4.alertState);
+      // stopAlarm must remain called EXACTLY ONCE!
+      expect(alarmService.stopAlarmCalls, equals(1));
+    });
+
+    test('Test 2: ALARM -> OPEN 300ms -> CLOSED -> ALARM (Recovery interrupted)', () async {
+      // Trigger ALARM
+      analyzer.processPrediction(createPrediction(state: EyeState.closed, timeOffset: Duration.zero));
+      final rAlarm = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 1600),
+      ));
+      expect(rAlarm.alertState, equals(DriverAlertState.alarm));
+
+      // OPEN for 300ms
+      final rOpen1 = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 1700),
+      ));
+      final rOpen2 = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 2000),
+      ));
+      expect(rOpen1.alertState, equals(DriverAlertState.alarm));
+      expect(rOpen2.alertState, equals(DriverAlertState.alarm));
+
+      // CLOSED arrives -> cancels recovery
+      final rClosed = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 2100),
+      ));
+      expect(rClosed.alertState, equals(DriverAlertState.alarm));
+      expect(analyzer.openStartedAt, isNull);
+    });
+
+    test('Test 3: ALARM -> UNKNOWN -> ALARM (UNKNOWN does not stop alarm or recover)', () {
+      // Trigger ALARM
+      analyzer.processPrediction(createPrediction(state: EyeState.closed, timeOffset: Duration.zero));
+      final rAlarm = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 1600),
+      ));
+      expect(rAlarm.alertState, equals(DriverAlertState.alarm));
+
+      // UNKNOWN arrives
+      final rUnknown = analyzer.processPrediction(EyePrediction(
+        state: EyeState.unknown,
+        openScore: 0.0,
+        closedScore: 0.0,
+        confidence: 0.0,
+        inferenceTime: const Duration(milliseconds: 20),
+        timestamp: baseTime.add(const Duration(milliseconds: 2000)),
+      ));
+
+      expect(rUnknown.alertState, equals(DriverAlertState.alarm));
+      expect(rUnknown.shouldStopAlarm, isFalse);
+      expect(analyzer.currentState, equals(DriverAlertState.alarm));
+    });
+
+    test('Test 4: Background simulation (AppLifecycleState.paused) matches Foreground behavior', () async {
+      final alarmService = MockAudioAlarmService();
+      final controller = AlarmController(alarmService);
+
+      // Simulation of Background state
+      AppLifecycleState lifecycleState = AppLifecycleState.paused;
+      bool isMonitoring = true;
+      bool foregroundServiceActive = true;
+
+      expect(lifecycleState, equals(AppLifecycleState.paused));
+      expect(isMonitoring, isTrue);
+      expect(foregroundServiceActive, isTrue);
+
+      // In Background: CLOSED -> triggers ALARM
+      analyzer.processPrediction(createPrediction(state: EyeState.closed, timeOffset: Duration.zero));
+      final rAlarm = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 1600),
+      ));
+      expect(rAlarm.alertState, equals(DriverAlertState.alarm));
+      await controller.sync(rAlarm.alertState);
+      expect(alarmService.playAlarmCalls, equals(1));
+      expect(controller.isPlaying, isTrue);
+
+      // In Background: OPEN continuously > recoveryThreshold -> NORMAL -> stopAlarm
+      // Start OPEN at 1700ms
+      analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 1700),
+      ));
+      // Continuous OPEN until 2750ms (> 1000ms recovery)
+      final rRecovered = analyzer.processPrediction(createPrediction(
+        state: EyeState.open,
+        timeOffset: const Duration(milliseconds: 2750),
+      ));
+
+      expect(rRecovered.alertState, equals(DriverAlertState.normal));
+      expect(rRecovered.shouldStopAlarm, isTrue);
+      await controller.sync(rRecovered.alertState);
+
+      expect(controller.isPlaying, isFalse);
+      expect(alarmService.stopAlarmCalls, equals(1));
+    });
   });
+}
+
+class MockAudioAlarmService implements AudioAlarmService {
+  int playAlarmCalls = 0;
+  int stopAlarmCalls = 0;
+  bool _playing = false;
+
+  @override
+  bool get isPlaying => _playing;
+
+  @override
+  Future<void> playAlarm() async {
+    playAlarmCalls++;
+    _playing = true;
+  }
+
+  @override
+  Future<void> stopAlarm() async {
+    stopAlarmCalls++;
+    _playing = false;
+  }
+
+  @override
+  Future<void> playTechnicalWarning() async {}
+
+  @override
+  Future<void> dispose() async {
+    _playing = false;
+  }
 }

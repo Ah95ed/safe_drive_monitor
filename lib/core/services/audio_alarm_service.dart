@@ -82,11 +82,8 @@ class AppAudioAlarmService implements AudioAlarmService {
 
   @override
   Future<void> stopAlarm() async {
-    if (!_isPlaying) {
-      return;
-    }
+    _isPlaying = false;
     try {
-      _isPlaying = false;
       await _player.stop();
       AppLogger.info(_tag, 'Alarm audio stopped.');
     } catch (e, st) {

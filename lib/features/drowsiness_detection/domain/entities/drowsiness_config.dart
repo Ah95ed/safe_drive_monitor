@@ -43,7 +43,7 @@ class DrowsinessConfig {
     this.watchingThreshold = const Duration(milliseconds: 350),
     this.drowsyThreshold = const Duration(milliseconds: 800),
     this.alarmThreshold = const Duration(milliseconds: 1200),
-    this.recoveryThreshold = const Duration(milliseconds: 1000),
+    this.recoveryThreshold = const Duration(milliseconds: 900),
     this.minimumClosedConfidence = 0.55,
     this.minimumOpenConfidence = 0.55,
     this.perclosWindowDuration = const Duration(seconds: 60),

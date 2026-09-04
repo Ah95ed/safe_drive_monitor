@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/widgets.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
 import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
+import 'package:safe_drive_monitor/core/services/alarm_controller.dart';
 import 'package:safe_drive_monitor/core/services/audio_alarm_service.dart';
 import 'package:safe_drive_monitor/core/services/battery_optimization_service.dart';
 import 'package:safe_drive_monitor/core/services/foreground_monitoring_service.dart';
@@ -25,7 +26,7 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/drowsiness_analyzer.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/low_light_detector.dart';
 
-class DrowsinessDetectionProvider extends ChangeNotifier {
+class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _tag = 'DrowsinessProvider';
 
   final CameraService _cameraService;
@@ -39,6 +40,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   final HapticService _hapticService;
   final BatteryOptimizationService _batteryOptService;
   final ForegroundMonitoringService _foregroundService;
+  late final AlarmController _alarmController;
+
+  AppLifecycleState _currentLifecycleState = AppLifecycleState.resumed;
 
   bool _disposed = false;
   bool _isInitialized = false;
@@ -95,6 +99,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
     DrowsinessAnalyzer? drowsinessAnalyzer,
     AudioAlarmService? audioAlarmService,
     HapticService? hapticService,
+    AlarmController? alarmController,
     BatteryOptimizationService? batteryOptService,
     ForegroundMonitoringService? foregroundService,
   })  : _cameraService = cameraService ?? AppCameraService(),
@@ -108,7 +113,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
         _hapticService = hapticService ?? AppHapticService(),
         _batteryOptService = batteryOptService ?? AppBatteryOptimizationService(),
         _foregroundService = foregroundService ?? AppForegroundMonitoringService() {
+    _alarmController = alarmController ??
+        AlarmController(_audioAlarmService, _hapticService);
     _syncConfigWithClassifier();
+    WidgetsBinding.instance.addObserver(this);
   }
 
   void _syncConfigWithClassifier() {
@@ -150,6 +158,13 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   DriverAlertState get alertState => _alertState;
   String get statusMessage => _statusMessage;
   Object? get error => _error;
+
+  AlarmController get alarmController => _alarmController;
+  AppLifecycleState get currentLifecycleState => _currentLifecycleState;
+  bool get isInBackground =>
+      _currentLifecycleState == AppLifecycleState.paused ||
+      _currentLifecycleState == AppLifecycleState.inactive ||
+      _currentLifecycleState == AppLifecycleState.hidden;
 
   bool get isPowerSaverMode => _isPowerSaverMode;
   bool get isIgnoringBatteryOptimizations => _isIgnoringBatteryOptimizations;
@@ -317,7 +332,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       _isMonitoring = false;
       _watchdog.stop();
       await _cameraService.stopImageStream();
-      await _stopAlarmFeedback();
+      await _alarmController.stop();
       await _foregroundService.stopForegroundService();
 
       _drowsinessAnalyzer.reset();
@@ -439,25 +454,6 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       final totalStopwatch = Stopwatch()..start();
       final isFaceActive = _faceTracker.isDriverFaceActive(now);
 
-      if (_roiStrategy != RoiStrategy.legacyCenterCrop && !isFaceActive) {
-        final noFace = EyePrediction(
-          state: EyeState.unknown,
-          openScore: 0.0,
-          closedScore: 0.0,
-          confidence: 0.0,
-          inferenceTime: Duration.zero,
-          timestamp: now,
-        );
-        final res = _drowsinessAnalyzer.processPrediction(noFace, driverFace: null);
-        _alertState = res.alertState;
-        _lastPrediction = noFace;
-        _statusMessage = _lightingManager.isCriticalDarkness
-            ? 'ظلام حرج — لا يمكن رؤية وجه السائق'
-            : 'لا يوجد وجه سائق واضح — جاري البحث...';
-        _notifyThrottled(now, force: true);
-        return;
-      }
-
       final dynamicRoi = (_roiStrategy != RoiStrategy.legacyCenterCrop && isFaceActive)
           ? _faceTracker.currentEyeRoi
           : null;
@@ -482,8 +478,18 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       final analysisResult = _drowsinessAnalyzer.processPrediction(
         prediction,
         driverFace: _currentDriverFace,
+        now: now,
       );
       _alertState = analysisResult.alertState;
+
+      // Log detailed background diagnostics per Requirement 1 & 11
+      if (isInBackground) {
+        _logBackgroundDebug(
+          prediction: prediction,
+          analysisResult: analysisResult,
+          alarmPlaying: _alarmController.isPlaying,
+        );
+      }
 
       // 6. Adaptive Inference Interval Throttling (3-5 Hz when open, 12-15 Hz when drowsy)
       if (config.enableAdaptiveInference) {
@@ -503,15 +509,11 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       }
       _lastPrediction = prediction;
 
-      // 7. Handle audio and vibration alarms
-      if (analysisResult.shouldTriggerAlarm) {
-        if (_isPowerSaverMode) {
-          _isPowerSaverMode = false;
-        }
-        await _triggerAlarmFeedback();
-      } else if (analysisResult.shouldStopAlarm) {
-        await _stopAlarmFeedback();
+      // 7. Synchronize unified AlarmController with DriverAlertState (Requirement 8)
+      if (_alertState == DriverAlertState.alarm && _isPowerSaverMode) {
+        _isPowerSaverMode = false;
       }
+      await _alarmController.sync(_alertState);
 
       totalStopwatch.stop();
       _totalFrameProcessingTime = totalStopwatch.elapsed;
@@ -581,27 +583,56 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _triggerAlarmFeedback() async {
-    await Future.wait([
-      _audioAlarmService.playAlarm(),
-      _hapticService.startAlarmHaptic(),
-    ]);
-  }
+  void _logBackgroundDebug({
+    required EyePrediction prediction,
+    required DrowsinessAnalysisResult analysisResult,
+    required bool alarmPlaying,
+  }) {
+    // 1. Structured log per Requirement 1
+    AppLogger.info(
+      'BACKGROUND_DEBUG',
+      'timestamp=${prediction.timestamp.toIso8601String()} '
+      'EyeState=${prediction.state.name} '
+      'openScore=${prediction.openScore.toStringAsFixed(3)} '
+      'closedScore=${prediction.closedScore.toStringAsFixed(3)} '
+      'confidence=${prediction.confidence.toStringAsFixed(3)} '
+      'DriverAlertState=${analysisResult.alertState.name} '
+      'openDuration=${analysisResult.continuousOpenDuration.inMilliseconds}ms '
+      'closedDuration=${analysisResult.continuousClosedDuration.inMilliseconds}ms '
+      'alarmPlaying=$alarmPlaying '
+      'AppLifecycleState=${_currentLifecycleState.name}',
+    );
 
-  Future<void> _stopAlarmFeedback() async {
-    await Future.wait([
-      _audioAlarmService.stopAlarm(),
-      _hapticService.stopAlarmHaptic(),
-    ]);
+    // 2. High-visibility log per Requirement 11
+    if (prediction.state == EyeState.open) {
+      final buffer = StringBuffer()
+        ..writeln('BG prediction=OPEN')
+        ..writeln('confidence=${prediction.confidence.toStringAsFixed(2)}')
+        ..writeln('openDuration=${analysisResult.continuousOpenDuration.inMilliseconds}ms');
+
+      if (analysisResult.shouldStopAlarm) {
+        buffer
+          ..writeln('RECOVERY_TRIGGERED')
+          ..writeln('alertState=NORMAL')
+          ..writeln('stopAlarm()')
+          ..writeln('alarmPlaying=false');
+      } else {
+        buffer
+          ..writeln('alertState=${analysisResult.alertState.name.toUpperCase()}')
+          ..writeln('alarmPlaying=$alarmPlaying');
+      }
+
+      AppLogger.info('BACKGROUND_MONITOR', buffer.toString().trim());
+    }
   }
 
   /// Test alarm flow for driver readiness validation before a trip.
   Future<void> testAlarm() async {
     try {
       AppLogger.info(_tag, 'Testing alarm sound and haptic feedback...');
-      await _triggerAlarmFeedback();
+      await _alarmController.sync(DriverAlertState.alarm);
       await Future.delayed(const Duration(seconds: 2));
-      await _stopAlarmFeedback();
+      await _alarmController.stop();
     } catch (e, st) {
       AppLogger.error(_tag, 'Test alarm failed', e, st);
     }
@@ -648,10 +679,16 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    handleAppLifecycleState(state);
+  }
+
   /// App Lifecycle state handling:
   /// CRITICAL (A2): Backgrounding the app (Home / Other app / Screen off) DOES NOT STOP MONITORING!
   /// Monitoring continues via the Android Foreground Service and WakeLock.
   void handleAppLifecycleState(AppLifecycleState state) {
+    _currentLifecycleState = state;
     AppLogger.info(_tag, 'AppLifecycleState changed to: ${state.name}');
     switch (state) {
       case AppLifecycleState.paused:
@@ -683,6 +720,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
       await stopMonitoring();
     } catch (_) {}
     try {
+      await _alarmController.dispose();
+    } catch (_) {}
+    try {
       await _cameraService.dispose();
     } catch (_) {}
     try {
@@ -703,6 +743,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     disposeResources().catchError((e) {
       AppLogger.error(_tag, 'Async disposal error', e);
     });
