@@ -136,5 +136,13 @@ void main() {
       expect(controller.isPlaying, isFalse);
       expect(audioService.stopAlarmCount, 1);
     });
+
+    test('Explicit stop cancels audio unconditionally even if controller was not in alarm state', () async {
+      expect(controller.isPlaying, isFalse);
+
+      await controller.stop();
+      expect(controller.isPlaying, isFalse);
+      expect(audioService.stopAlarmCount, 1);
+    });
   });
 }

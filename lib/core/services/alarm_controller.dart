@@ -49,15 +49,17 @@ class AlarmController {
     }
   }
 
-  /// Explicitly halts any ongoing alarm playback regardless of current state.
+  /// Explicitly halts any ongoing alarm playback unconditionally regardless of state.
   Future<void> stop() async {
-    if (_isPlaying) {
-      _isPlaying = false;
-      AppLogger.info(_tag, 'AlarmController: explicit stop invoked.');
+    _isPlaying = false;
+    AppLogger.info(_tag, 'AlarmController: explicit stop invoked.');
+    try {
       await Future.wait([
         _alarmService.stopAlarm(),
         if (_hapticService != null) _hapticService.stopAlarmHaptic(),
       ]);
+    } catch (e, st) {
+      AppLogger.error(_tag, 'Failed during explicit stop', e, st);
     }
   }
 

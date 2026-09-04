@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/widgets.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
@@ -332,7 +333,12 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _isMonitoring = false;
       _watchdog.stop();
       await _cameraService.stopImageStream();
+
+      // Unconditionally stop all audio and haptics across all services
       await _alarmController.stop();
+      await _audioAlarmService.stopAlarm();
+      await _hapticService.stopAlarmHaptic();
+
       await _foregroundService.stopForegroundService();
 
       _drowsinessAnalyzer.reset();
@@ -432,12 +438,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       return;
     }
 
-    // 4. Asynchronous throttled Face Detection
-    final Duration dynamicFaceInterval = _faceTracker.isDriverFaceActive(now)
-        ? const Duration(milliseconds: 900)
-        : _faceDetectionInterval;
+    // 4. Asynchronous Face Detection: maintain consistent ~280ms interval for fresh tracking
     if (!_isDetectingFace &&
-        now.difference(_lastFaceDetectionTimestamp) >= dynamicFaceInterval) {
+        now.difference(_lastFaceDetectionTimestamp) >= _faceDetectionInterval) {
       _runFaceDetection(image, now);
     }
 
@@ -452,13 +455,45 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
 
     try {
       final totalStopwatch = Stopwatch()..start();
-      final isFaceActive = _faceTracker.isDriverFaceActive(now);
+      final isFaceActive = _faceTracker.isDriverFaceActive(now) && _currentDriverFace != null;
 
-      final dynamicRoi = (_roiStrategy != RoiStrategy.legacyCenterCrop && isFaceActive)
-          ? _faceTracker.currentEyeRoi
+      // 1. Mandatory Face Presence Check:
+      // If no face is detected, we do NOT run eye inference on background objects (empty room, desk, steering wheel).
+      // Drowsiness counters are reset and any active alarm is halted immediately.
+      if (!isFaceActive) {
+        _lastPrediction = null;
+        final previousAlert = _alertState;
+        final analysisResult = _drowsinessAnalyzer.processPrediction(
+          EyePrediction.unknown(timestamp: now),
+          hasDriverFace: false,
+          now: now,
+        );
+        _alertState = analysisResult.alertState;
+        _statusMessage = analysisResult.statusMessage;
+
+        // CRITICAL: Record inference heartbeat in watchdog!
+        // The pipeline is active and healthy, successfully evaluating the frame (no face).
+        _watchdog.recordInferenceHeartbeat(now);
+        _sessionState = _sessionState.copyWith(lastInferenceAt: now);
+
+        // Ensure alarm and any audio is completely stopped if no face is in frame
+        await _alarmController.stop();
+        await _audioAlarmService.stopAlarm();
+        await _hapticService.stopAlarmHaptic();
+
+        totalStopwatch.stop();
+        _totalFrameProcessingTime = totalStopwatch.elapsed;
+        _processedFramesCount++;
+        _notifyThrottled(now, force: _alertState != previousAlert);
+        return;
+      }
+
+      // 2. Face is active! Extract dynamicRoi from driver face
+      final dynamicRoi = (_roiStrategy != RoiStrategy.legacyCenterCrop)
+          ? (_currentDriverFace!.eyeRoi)
           : null;
 
-      final prediction = await _classifier.classify(
+      final rawPrediction = await _classifier.classify(
         image,
         sensorRotation:
             (_cameraService.sensorOrientation + _rotationOffset) % 360,
@@ -466,6 +501,42 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       );
 
       if (_disposed || !_isMonitoring) return;
+
+      // 3. Multi-modal Sensor Fusion:
+      // Combine TFLite eye crop prediction with ML Kit Face Detector's native eye open probability.
+      EyePrediction prediction = rawPrediction;
+      final bool isMlKitFresh = _currentDriverFace != null &&
+          now.difference(_currentDriverFace!.detectedAt) <= const Duration(milliseconds: 700);
+      final double? mlKitOpenProb = isMlKitFresh
+          ? _currentDriverFace!.averageEyeOpenProbability
+          : null;
+
+      if (mlKitOpenProb != null) {
+        if (mlKitOpenProb >= 0.60) {
+          // ML Kit strongly indicates eyes are OPEN: guarantee OPEN state and high confidence
+          if (rawPrediction.state != EyeState.open || rawPrediction.confidence < mlKitOpenProb) {
+            prediction = EyePrediction(
+              state: EyeState.open,
+              openScore: mlKitOpenProb,
+              closedScore: 1.0 - mlKitOpenProb,
+              confidence: mlKitOpenProb,
+              inferenceTime: rawPrediction.inferenceTime,
+              timestamp: rawPrediction.timestamp,
+            );
+          }
+        } else if (mlKitOpenProb <= 0.20 && rawPrediction.state == EyeState.closed) {
+          // Both confirm CLOSED with high confidence
+          final double closedConf = max(rawPrediction.confidence, 1.0 - mlKitOpenProb);
+          prediction = EyePrediction(
+            state: EyeState.closed,
+            openScore: mlKitOpenProb,
+            closedScore: 1.0 - mlKitOpenProb,
+            confidence: closedConf,
+            inferenceTime: rawPrediction.inferenceTime,
+            timestamp: rawPrediction.timestamp,
+          );
+        }
+      }
 
       _inferenceTime = prediction.inferenceTime;
 
@@ -478,6 +549,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       final analysisResult = _drowsinessAnalyzer.processPrediction(
         prediction,
         driverFace: _currentDriverFace,
+        hasDriverFace: true,
         now: now,
       );
       _alertState = analysisResult.alertState;
@@ -498,20 +570,19 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         } else if (_alertState == DriverAlertState.watching) {
           _inferenceInterval = const Duration(milliseconds: 125); // 8 Hz
         } else {
-          _inferenceInterval = config.alertInferenceInterval; // 66ms (~15 Hz)
+          _inferenceInterval = config.alertInferenceInterval; // 90ms (~11 Hz)
         }
       }
 
-      if (!isFaceActive && _roiStrategy == RoiStrategy.eyeBand) {
-        _statusMessage = '${analysisResult.statusMessage} (جاري البحث عن قفل الوجه...)';
-      } else {
-        _statusMessage = analysisResult.statusMessage;
-      }
+      _statusMessage = analysisResult.statusMessage;
       _lastPrediction = prediction;
 
-      // 7. Synchronize unified AlarmController with DriverAlertState (Requirement 8)
-      if (_alertState == DriverAlertState.alarm && _isPowerSaverMode) {
-        _isPowerSaverMode = false;
+      // Guard against race condition if monitoring stopped while frame was in flight
+      if (_disposed || !_isMonitoring) {
+        await _alarmController.stop();
+        await _audioAlarmService.stopAlarm();
+        await _hapticService.stopAlarmHaptic();
+        return;
       }
       await _alarmController.sync(_alertState);
 
@@ -732,6 +803,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       await _faceDetectionService.dispose();
     } catch (_) {}
     try {
+      await _audioAlarmService.stopAlarm();
       await _audioAlarmService.dispose();
     } catch (_) {}
     try {

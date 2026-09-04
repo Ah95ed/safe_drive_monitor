@@ -71,9 +71,29 @@ class DrowsinessAnalyzer {
   DrowsinessAnalysisResult processPrediction(
     EyePrediction prediction, {
     DriverFace? driverFace,
+    bool hasDriverFace = true,
     DateTime? now,
   }) {
     final currentNow = now ?? prediction.timestamp;
+
+    // 0. Face Presence Gating: A driver face MUST be present to evaluate drowsiness.
+    // If no face is detected in the frame, drowsiness alarm must NEVER trigger.
+    if (!hasDriverFace) {
+      _closedStartedAt = null;
+      _openStartedAt = null;
+      final wasAlarm = _currentState == DriverAlertState.alarm || _isAlarmPlaying;
+      _currentState = DriverAlertState.normal;
+      _isAlarmPlaying = false;
+      return _buildResult(
+        continuousClosed: Duration.zero,
+        continuousOpen: Duration.zero,
+        perclos: currentPerclos,
+        isHeadNod: false,
+        shouldTriggerAlarm: false,
+        shouldStopAlarm: wasAlarm,
+        message: 'لا يوجد وجه سائق واضح — يرجى توجيه الكاميرا نحو الوجه',
+      );
+    }
 
     // Check head nod (pitch < threshold)
     final double? pitch = driverFace?.headEulerAngleX;

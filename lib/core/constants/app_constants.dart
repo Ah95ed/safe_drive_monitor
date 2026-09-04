@@ -16,7 +16,7 @@ class AppConstants {
 
   /// Watchdog stall thresholds
   static const Duration cameraStallTimeout = Duration(milliseconds: 2500);
-  static const Duration inferenceStallTimeout = Duration(milliseconds: 3000);
+  static const Duration inferenceStallTimeout = Duration(milliseconds: 7000);
   static const Duration faceLostDegradedTimeout = Duration(milliseconds: 3500);
 
   /// Lighting analysis thresholds on Y-plane (0..255)

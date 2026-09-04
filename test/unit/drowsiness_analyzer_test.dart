@@ -407,6 +407,51 @@ void main() {
       expect(controller.isPlaying, isFalse);
       expect(alarmService.stopAlarmCalls, equals(1));
     });
+
+    test('Test 5: No face present (hasDriverFace: false) NEVER triggers alarm even on CLOSED stream', () async {
+      // Stream of CLOSED frames for 5 seconds, but with hasDriverFace: false
+      for (int i = 0; i <= 5000; i += 200) {
+        final r = analyzer.processPrediction(
+          createPrediction(state: EyeState.closed, timeOffset: Duration(milliseconds: i)),
+          hasDriverFace: false,
+        );
+        expect(r.alertState, equals(DriverAlertState.normal));
+        expect(r.shouldTriggerAlarm, isFalse);
+        expect(r.continuousClosedDuration, equals(Duration.zero));
+        expect(r.statusMessage, contains('لا يوجد وجه سائق واضح'));
+      }
+      expect(analyzer.currentState, equals(DriverAlertState.normal));
+      expect(analyzer.isAlarmActive, isFalse);
+    });
+
+    test('Test 6: Active ALARM immediately halts if driver face is lost (hasDriverFace: false)', () async {
+      final alarmService = MockAudioAlarmService();
+      final controller = AlarmController(alarmService);
+
+      // Trigger ALARM with face present
+      analyzer.processPrediction(createPrediction(state: EyeState.closed, timeOffset: Duration.zero));
+      final rAlarm = analyzer.processPrediction(createPrediction(
+        state: EyeState.closed,
+        timeOffset: const Duration(milliseconds: 1600),
+      ));
+      expect(rAlarm.alertState, equals(DriverAlertState.alarm));
+      await controller.sync(rAlarm.alertState);
+      expect(controller.isPlaying, isTrue);
+
+      // Driver leaves camera frame -> hasDriverFace = false
+      final rLost = analyzer.processPrediction(
+        EyePrediction.unknown(timestamp: baseTime.add(const Duration(milliseconds: 1800))),
+        hasDriverFace: false,
+      );
+      expect(rLost.alertState, equals(DriverAlertState.normal));
+      expect(rLost.shouldStopAlarm, isTrue);
+      expect(rLost.shouldTriggerAlarm, isFalse);
+      expect(rLost.continuousClosedDuration, equals(Duration.zero));
+
+      await controller.sync(rLost.alertState);
+      expect(controller.isPlaying, isFalse);
+      expect(alarmService.stopAlarmCalls, equals(1));
+    });
   });
 }
 

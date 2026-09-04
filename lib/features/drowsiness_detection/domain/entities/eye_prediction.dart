@@ -21,6 +21,18 @@ class EyePrediction {
     required this.timestamp,
   });
 
+  /// Factory for creating an unknown eye prediction when face or eyes are unreadable
+  factory EyePrediction.unknown({DateTime? timestamp}) {
+    return EyePrediction(
+      state: EyeState.unknown,
+      openScore: 0.0,
+      closedScore: 0.0,
+      confidence: 0.0,
+      inferenceTime: Duration.zero,
+      timestamp: timestamp ?? DateTime.now(),
+    );
+  }
+
   bool get isClosed => state == EyeState.closed;
   bool get isOpen => state == EyeState.open;
   bool get isUnknown => state == EyeState.unknown;

@@ -15,9 +15,9 @@ class DriverFaceTracker {
   DateTime? _lastDetectedTimestamp;
 
   DriverFaceTracker({
-    // Detection runs at ~2-3 Hz and can stutter under CPU load (alarm audio,
-    // inference); keep the tracked ROI usable a little longer between hits.
-    this.faceLossTimeout = const Duration(milliseconds: 1500),
+    // Keep the tracked ROI usable during background audio/inference load.
+    // 2500ms provides stability against dropped frames while avoiding stale lock.
+    this.faceLossTimeout = const Duration(milliseconds: 2500),
     this.smoothingFactor = 0.35, // 35% new, 65% previous for smooth transitions
   });
 

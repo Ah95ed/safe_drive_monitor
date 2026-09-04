@@ -16,7 +16,11 @@ class AppAudioAlarmService implements AudioAlarmService {
   bool _isPlaying = false;
   bool _contextConfigured = false;
 
-  AppAudioAlarmService({AudioPlayer? player}) : _player = player ?? AudioPlayer();
+  AppAudioAlarmService({AudioPlayer? player}) : _player = player ?? AudioPlayer() {
+    _player.onPlayerComplete.listen((_) {
+      _isPlaying = false;
+    });
+  }
 
   @override
   bool get isPlaying => _isPlaying;
@@ -69,6 +73,7 @@ class AppAudioAlarmService implements AudioAlarmService {
   @override
   Future<void> playTechnicalWarning() async {
     try {
+      _isPlaying = true;
       await _configureAudioContext();
       // Plays once at moderate volume (distinct from screaming continuous drowsiness alarm)
       await _player.setReleaseMode(ReleaseMode.stop);
@@ -76,6 +81,7 @@ class AppAudioAlarmService implements AudioAlarmService {
       await _player.play(AssetSource(AppConstants.technicalWarningSoundAsset));
       AppLogger.info(_tag, 'Technical warning tone triggered.');
     } catch (e, st) {
+      _isPlaying = false;
       AppLogger.error(_tag, 'Failed to play technical warning tone', e, st);
     }
   }
@@ -87,6 +93,7 @@ class AppAudioAlarmService implements AudioAlarmService {
       await _player.stop();
       AppLogger.info(_tag, 'Alarm audio stopped.');
     } catch (e, st) {
+      _isPlaying = false;
       AppLogger.error(_tag, 'Failed to stop alarm audio', e, st);
     }
   }
