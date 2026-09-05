@@ -8,12 +8,61 @@ abstract class ForegroundMonitoringService {
   Future<bool> isForegroundServiceRunning();
   Future<bool> isLowLightBoostSupported();
   Future<void> openBatterySettings();
+  Future<bool> moveTaskToBackground();
+  Future<bool> updateNotificationStatus(String statusText);
+  void setNotificationStopHandler(Future<void> Function()? handler);
 }
 
 class AppForegroundMonitoringService implements ForegroundMonitoringService {
   static const String _tag = 'ForegroundMonitoringService';
   static const MethodChannel _channel =
       MethodChannel('com.eyewatchdriver.eye.safe_drive_monitor/foreground_service');
+
+  Future<void> Function()? _notificationStopHandler;
+
+  AppForegroundMonitoringService() {
+    _channel.setMethodCallHandler(_handleMethodCall);
+  }
+
+  Future<dynamic> _handleMethodCall(MethodCall call) async {
+    if (call.method == 'onNotificationStopRequested') {
+      AppLogger.info(_tag, 'Received onNotificationStopRequested from native notification action.');
+      if (_notificationStopHandler != null) {
+        await _notificationStopHandler!();
+      }
+    }
+  }
+
+  @override
+  void setNotificationStopHandler(Future<void> Function()? handler) {
+    _notificationStopHandler = handler;
+  }
+
+  @override
+  Future<bool> moveTaskToBackground() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('moveTaskToBackground');
+      AppLogger.info(_tag, 'moveTaskToBackground invoked, result: $result');
+      return result ?? false;
+    } catch (e) {
+      AppLogger.error(_tag, 'Failed to move task to background: $e');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> updateNotificationStatus(String statusText) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'updateNotificationStatus',
+        {'statusText': statusText},
+      );
+      return result ?? false;
+    } catch (e) {
+      AppLogger.warning(_tag, 'Failed to update notification status: $e');
+      return false;
+    }
+  }
 
   @override
   Future<bool> startForegroundService() async {

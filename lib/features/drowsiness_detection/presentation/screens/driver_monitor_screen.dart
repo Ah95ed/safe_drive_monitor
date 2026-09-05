@@ -18,28 +18,15 @@ class DriverMonitorScreen extends StatefulWidget {
   State<DriverMonitorScreen> createState() => _DriverMonitorScreenState();
 }
 
-class _DriverMonitorScreenState extends State<DriverMonitorScreen>
-    with WidgetsBindingObserver {
+class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<DrowsinessDetectionProvider>();
       provider.initialize();
     });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    context.read<DrowsinessDetectionProvider>().handleAppLifecycleState(state);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
   }
 
   void _showBatteryExemptionDialog(BuildContext context, DrowsinessDetectionProvider provider) {
@@ -89,9 +76,17 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
       builder: (context, provider, child) {
         final isAlarm = provider.alertState.isAlarm;
 
-        return Scaffold(
-          backgroundColor:
-              isAlarm ? const Color(0xFF2A0909) : AppColors.background,
+        return PopScope(
+          canPop: !provider.isMonitoring,
+          onPopInvokedWithResult: (didPop, result) async {
+            if (didPop) return;
+            if (provider.isMonitoring) {
+              await provider.moveTaskToBackground();
+            }
+          },
+          child: Scaffold(
+            backgroundColor:
+                isAlarm ? const Color(0xFF2A0909) : AppColors.background,
           appBar: AppBar(
             backgroundColor:
                 isAlarm ? AppColors.alarmRed : AppColors.surface,
@@ -339,8 +334,9 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen>
                 ),
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 }

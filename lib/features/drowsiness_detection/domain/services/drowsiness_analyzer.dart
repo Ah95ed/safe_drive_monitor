@@ -3,6 +3,7 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_face.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/drowsiness_config.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/timed_eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/perclos_calculator.dart';
 
 /// Result of an analysis step by [DrowsinessAnalyzer].
@@ -15,6 +16,11 @@ class DrowsinessAnalysisResult {
   final bool shouldTriggerAlarm;
   final bool shouldStopAlarm;
   final String statusMessage;
+  final double openRatio;
+  final double closedRatio;
+  final double unknownRatio;
+  final double emaOpenConfidence;
+  final bool isRecovering;
 
   const DrowsinessAnalysisResult({
     required this.alertState,
@@ -25,6 +31,11 @@ class DrowsinessAnalysisResult {
     required this.shouldTriggerAlarm,
     required this.shouldStopAlarm,
     required this.statusMessage,
+    this.openRatio = 0.0,
+    this.closedRatio = 0.0,
+    this.unknownRatio = 0.0,
+    this.emaOpenConfidence = 0.0,
+    this.isRecovering = false,
   });
 }
 
@@ -39,6 +50,9 @@ class DrowsinessAnalyzer {
   DateTime? _closedStartedAt;
   DateTime? _openStartedAt;
   bool _isAlarmPlaying = false;
+
+  final List<TimedEyePrediction> _recoveryWindow = [];
+  double _emaOpenConfidence = 0.0;
 
   DrowsinessAnalyzer({
     this.config = const DrowsinessConfig(),
@@ -57,6 +71,8 @@ class DrowsinessAnalyzer {
   double get currentPerclosPercentage => _perclosCalculator.currentPerclosPercentage;
   DateTime? get closedStartedAt => _closedStartedAt;
   DateTime? get openStartedAt => _openStartedAt;
+  double get emaOpenConfidence => _emaOpenConfidence;
+  List<TimedEyePrediction> get recoveryWindow => List.unmodifiable(_recoveryWindow);
 
   /// Resets the analyzer state and PERCLOS rolling window.
   void reset() {
@@ -64,6 +80,8 @@ class DrowsinessAnalyzer {
     _closedStartedAt = null;
     _openStartedAt = null;
     _isAlarmPlaying = false;
+    _recoveryWindow.clear();
+    _emaOpenConfidence = 0.0;
     _perclosCalculator.reset();
   }
 
@@ -76,12 +94,39 @@ class DrowsinessAnalyzer {
   }) {
     final currentNow = now ?? prediction.timestamp;
 
+    // Record sample into rolling recovery window
+    _recoveryWindow.add(TimedEyePrediction.fromPrediction(prediction));
+    final pruneCutoff = currentNow.subtract(config.recoveryWindowDuration + const Duration(milliseconds: 500));
+    _recoveryWindow.removeWhere((p) => p.timestamp.isBefore(pruneCutoff));
+
+    // Update Exponential Moving Average (EMA) of open confidence
+    final double sampleOpenConf = (prediction.state == EyeState.open && prediction.confidence >= config.minimumOpenConfidence)
+        ? prediction.confidence
+        : 0.0;
+    _emaOpenConfidence = (_emaOpenConfidence == 0.0 && prediction.state == EyeState.open)
+        ? sampleOpenConf
+        : (config.recoveryEmaAlpha * sampleOpenConf) + ((1.0 - config.recoveryEmaAlpha) * _emaOpenConfidence);
+
+    // Compute window stats for the configured window duration
+    final windowCutoff = currentNow.subtract(config.recoveryWindowDuration);
+    final activeWindow = _recoveryWindow.where((p) => !p.timestamp.isBefore(windowCutoff)).toList();
+    final totalSamples = activeWindow.length;
+    final openCount = activeWindow.where((p) => p.isOpen).length;
+    final closedCount = activeWindow.where((p) => p.isClosed).length;
+    final unknownCount = activeWindow.where((p) => p.isUnknown).length;
+
+    final double openRatio = totalSamples > 0 ? openCount / totalSamples : 0.0;
+    final double closedRatio = totalSamples > 0 ? closedCount / totalSamples : 0.0;
+    final double unknownRatio = totalSamples > 0 ? unknownCount / totalSamples : 0.0;
+
     // 0. Face Presence Gating: A driver face MUST be present to evaluate drowsiness.
     // If no face is detected in the frame, drowsiness alarm must NEVER trigger.
     if (!hasDriverFace) {
       _closedStartedAt = null;
       _openStartedAt = null;
-      final wasAlarm = _currentState == DriverAlertState.alarm || _isAlarmPlaying;
+      final wasAlarm = _currentState == DriverAlertState.alarm ||
+          _currentState == DriverAlertState.recovering ||
+          _isAlarmPlaying;
       _currentState = DriverAlertState.normal;
       _isAlarmPlaying = false;
       return _buildResult(
@@ -92,6 +137,9 @@ class DrowsinessAnalyzer {
         shouldTriggerAlarm: false,
         shouldStopAlarm: wasAlarm,
         message: 'لا يوجد وجه سائق واضح — يرجى توجيه الكاميرا نحو الوجه',
+        openRatio: openRatio,
+        closedRatio: closedRatio,
+        unknownRatio: unknownRatio,
       );
     }
 
@@ -99,28 +147,198 @@ class DrowsinessAnalyzer {
     final double? pitch = driverFace?.headEulerAngleX;
     final bool isHeadNodding = pitch != null && pitch < config.headNodPitchThreshold;
 
-    // 1. UNKNOWN prediction handling (Requirement 6: UNKNOWN does NOT mean OPEN)
+    // 1. UNKNOWN prediction handling (Requirement 6: UNKNOWN does NOT mean OPEN or CLOSED)
     if (prediction.isUnknown) {
-      // Keep current alarm state until confident OPEN or CLOSED is observed
+      final isCurrentlyInAlarm = _currentState == DriverAlertState.alarm ||
+          _currentState == DriverAlertState.recovering ||
+          _isAlarmPlaying;
       return _buildResult(
         continuousClosed: _calculateDuration(_closedStartedAt, currentNow),
         continuousOpen: _calculateDuration(_openStartedAt, currentNow),
         perclos: currentPerclos,
         isHeadNod: isHeadNodding,
-        shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+        shouldTriggerAlarm: isCurrentlyInAlarm,
         shouldStopAlarm: false,
         message: 'جاري التحقق من وضوح الصورة...',
+        openRatio: openRatio,
+        closedRatio: closedRatio,
+        unknownRatio: unknownRatio,
+        emaOpenConfidence: _emaOpenConfidence,
+        isRecovering: _currentState == DriverAlertState.recovering,
       );
     }
 
     // Update rolling PERCLOS window for valid predictions
     final perclos = _perclosCalculator.addPrediction(prediction);
 
-    // 2. CLOSED eye handling (Requirement 5 & 7)
-    if (prediction.state == EyeState.closed) {
-      // Driver closed eyes: immediately cancel any pending recovery
-      _openStartedAt = null;
+    // 2. ACTIVE ALARM / RECOVERY HANDLING (Phases 6, 7, 8, 9)
+    final bool isInAlarmOrRecovering = _currentState == DriverAlertState.alarm ||
+        _currentState == DriverAlertState.recovering ||
+        _isAlarmPlaying;
 
+    if (isInAlarmOrRecovering) {
+      // 1. If eyes haven't opened yet: keep alarm active on closed frames
+      if (_openStartedAt == null) {
+        if (prediction.state == EyeState.closed &&
+            prediction.confidence >= config.minimumClosedConfidence) {
+          _currentState = DriverAlertState.alarm;
+          _closedStartedAt ??= currentNow;
+          final closedDuration = currentNow.difference(_closedStartedAt!);
+
+          return _buildResult(
+            continuousClosed: closedDuration,
+            continuousOpen: Duration.zero,
+            perclos: perclos,
+            isHeadNod: isHeadNodding,
+            shouldTriggerAlarm: true,
+            shouldStopAlarm: false,
+            message: '🚨 انتبه! تم اكتشاف نوم أثناء القيادة!',
+            openRatio: openRatio,
+            closedRatio: closedRatio,
+            unknownRatio: unknownRatio,
+            emaOpenConfidence: _emaOpenConfidence,
+            isRecovering: false,
+          );
+        }
+      }
+
+      // 2. If eyes have begun opening (_openStartedAt != null), check for relapse:
+      // A strong closed frame (>= recoveryRecentClosedMinConfidence) or recent strong closed frames abort recovery!
+      final bool isCurrentStrongClosed = prediction.state == EyeState.closed &&
+          prediction.confidence >= config.recoveryRecentClosedMinConfidence;
+      final recentClosedCutoff = currentNow.subtract(config.recoveryRecentClosedWindow);
+      final hasRecentStrongClosed = _openStartedAt != null &&
+          activeWindow.any((p) =>
+              p.isClosed &&
+              !p.timestamp.isBefore(_openStartedAt!) &&
+              !p.timestamp.isBefore(recentClosedCutoff) &&
+              p.confidence >= config.recoveryRecentClosedMinConfidence);
+
+      if (isCurrentStrongClosed || hasRecentStrongClosed) {
+        _openStartedAt = null;
+        _currentState = DriverAlertState.alarm;
+        _closedStartedAt ??= currentNow;
+        final closedDuration = currentNow.difference(_closedStartedAt!);
+
+        return _buildResult(
+          continuousClosed: closedDuration,
+          continuousOpen: Duration.zero,
+          perclos: perclos,
+          isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: true,
+          shouldStopAlarm: false,
+          message: '🚨 انتبه! تم اكتشاف نوم أثناء القيادة!',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
+          isRecovering: false,
+        );
+      }
+
+      // 3. Open evaluation:
+      if (prediction.state == EyeState.open &&
+          prediction.confidence >= config.minimumOpenConfidence) {
+        _closedStartedAt = null;
+        _openStartedAt ??= currentNow;
+      }
+
+      final openDuration = _openStartedAt != null
+          ? currentNow.difference(_openStartedAt!)
+          : Duration.zero;
+      final windowSpan = activeWindow.isNotEmpty
+          ? currentNow.difference(activeWindow.first.timestamp)
+          : Duration.zero;
+      final bool durationMet = openDuration >= config.recoveryThreshold ||
+          (windowSpan >= config.recoveryWindowDuration && _openStartedAt != null);
+
+      // openRatio >= recoveryMinOpenRatio (0.70)
+      final bool openRatioMet = openRatio >= config.recoveryMinOpenRatio;
+
+      // Last 3 valid predictions: at least 2 are OPEN
+      final validPredictions = activeWindow.where((p) => !p.isUnknown).toList();
+      final last3 = validPredictions.length >= 3
+          ? validPredictions.sublist(validPredictions.length - 3)
+          : validPredictions;
+      final int openInLast3 = last3.where((p) => p.isOpen).length;
+      final bool recentOpenMet = last3.isNotEmpty &&
+          (last3.length >= 3 ? openInLast3 >= 2 : openInLast3 >= 1);
+
+      // EMA open confidence >= 0.60
+      final bool emaMet = _emaOpenConfidence >= config.recoveryMinEmaConfidence;
+
+      // Unknown ratio is within acceptable limits (<= 0.40)
+      final bool unknownMet = unknownRatio <= config.recoveryMaxUnknownRatio;
+
+      if (durationMet && openRatioMet && recentOpenMet && emaMet && unknownMet) {
+        // FULL RECOVERY CONFIRMED! Transition to NORMAL
+        _currentState = DriverAlertState.normal;
+        _isAlarmPlaying = false;
+        _closedStartedAt = null;
+        _openStartedAt = null;
+
+        return _buildResult(
+          continuousClosed: Duration.zero,
+          continuousOpen: openDuration,
+          perclos: perclos,
+          isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: false,
+          shouldStopAlarm: true,
+          message: 'تم استعادة الانتباه - العينان مفتوحتان',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
+          isRecovering: false,
+        );
+      } else {
+        // Still in recovery confirmation window
+        // Transition ALARM -> RECOVERING when sustained open evidence emerges (> 200ms or openRatio >= 0.50)
+        if (_openStartedAt != null &&
+            (openDuration >= const Duration(milliseconds: 200) || openRatio >= 0.50)) {
+          _currentState = DriverAlertState.recovering;
+        } else {
+          _currentState = DriverAlertState.alarm;
+        }
+
+        return _buildResult(
+          continuousClosed: Duration.zero,
+          continuousOpen: openDuration,
+          perclos: perclos,
+          isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: true,
+          shouldStopAlarm: false,
+          message: 'جاري تأكيد استيقاظ السائق...',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
+          isRecovering: _currentState == DriverAlertState.recovering,
+        );
+      }
+    }
+
+    // 3. NORMAL MONITORING (NON-ALARM) FLOW
+    if (prediction.state == EyeState.closed) {
+      if (prediction.confidence < config.minimumClosedConfidence) {
+        // Ambiguous closed reading: debounce away
+        return _buildResult(
+          continuousClosed: _calculateDuration(_closedStartedAt, currentNow),
+          continuousOpen: _calculateDuration(_openStartedAt, currentNow),
+          perclos: perclos,
+          isHeadNod: isHeadNodding,
+          shouldTriggerAlarm: false,
+          shouldStopAlarm: false,
+          message: 'مراقبة العينين...',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
+        );
+      }
+
+      // Confirmed closed eye prediction
+      _openStartedAt = null;
       _closedStartedAt ??= currentNow;
       final closedDuration = currentNow.difference(_closedStartedAt!);
 
@@ -143,118 +361,98 @@ class DrowsinessAnalyzer {
           shouldTriggerAlarm: true,
           shouldStopAlarm: false,
           message: msg,
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
         );
       } else if (closedDuration >= config.drowsyThreshold || _perclosCalculator.isWarningLevel) {
-        if (_currentState != DriverAlertState.alarm) {
-          _currentState = DriverAlertState.drowsy;
-        }
+        _currentState = DriverAlertState.drowsy;
         return _buildResult(
           continuousClosed: closedDuration,
           continuousOpen: Duration.zero,
           perclos: perclos,
           isHeadNod: isHeadNodding,
-          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldTriggerAlarm: false,
           shouldStopAlarm: false,
           message: '⚠️ تحذير: علامات نعاس وإجهاد!',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
         );
       } else if (closedDuration >= config.watchingThreshold) {
-        if (_currentState != DriverAlertState.alarm &&
-            _currentState != DriverAlertState.drowsy) {
-          _currentState = DriverAlertState.watching;
-        }
+        _currentState = DriverAlertState.watching;
         return _buildResult(
           continuousClosed: closedDuration,
           continuousOpen: Duration.zero,
           perclos: perclos,
           isHeadNod: isHeadNodding,
-          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldTriggerAlarm: false,
           shouldStopAlarm: false,
           message: 'مراقبة العينين...',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
         );
       } else {
-        // Under watching threshold (< 350ms) -> Natural blink
+        // Natural blink (< 350ms)
         return _buildResult(
           continuousClosed: closedDuration,
           continuousOpen: Duration.zero,
           perclos: perclos,
           isHeadNod: isHeadNodding,
-          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
+          shouldTriggerAlarm: false,
           shouldStopAlarm: false,
           message: 'رمش طبيعي',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
         );
       }
     } else {
-      // 3. OPEN eye handling (Requirement 5)
-      // Check confidence threshold: if below minimumOpenConfidence, do NOT count as recovery
+      // Confirmed OPEN eye prediction
       if (prediction.confidence < config.minimumOpenConfidence) {
         return _buildResult(
           continuousClosed: _calculateDuration(_closedStartedAt, currentNow),
           continuousOpen: _calculateDuration(_openStartedAt, currentNow),
           perclos: perclos,
           isHeadNod: isHeadNodding,
-          shouldTriggerAlarm: _currentState == DriverAlertState.alarm,
-          shouldStopAlarm: false,
-          message: 'جاري تأكيد حالة العينين...',
-        );
-      }
-
-      // Valid open eye prediction
-      _closedStartedAt = null;
-
-      // If alarm is currently active, require continuous open state for recoveryThreshold (900ms)
-      if (_currentState == DriverAlertState.alarm || _isAlarmPlaying) {
-        _openStartedAt ??= currentNow;
-        final openDuration = currentNow.difference(_openStartedAt!);
-
-        if (openDuration >= config.recoveryThreshold) {
-          // Successfully recovered from alarm!
-          _currentState = DriverAlertState.normal;
-          _isAlarmPlaying = false;
-          _closedStartedAt = null;
-          _openStartedAt = null;
-
-          return _buildResult(
-            continuousClosed: Duration.zero,
-            continuousOpen: openDuration,
-            perclos: perclos,
-            isHeadNod: isHeadNodding,
-            shouldTriggerAlarm: false,
-            shouldStopAlarm: true,
-            message: 'تم استعادة الانتباه - العينان مفتوحتان',
-          );
-        } else {
-          // Still in alarm until full recovery window is fulfilled
-          return _buildResult(
-            continuousClosed: Duration.zero,
-            continuousOpen: openDuration,
-            perclos: perclos,
-            isHeadNod: isHeadNodding,
-            shouldTriggerAlarm: true,
-            shouldStopAlarm: false,
-            message: 'جاري تأكيد استيقاظ السائق...',
-          );
-        }
-      } else {
-        // Normal open state
-        _openStartedAt ??= currentNow;
-        final openDuration = currentNow.difference(_openStartedAt!);
-
-        _currentState = _perclosCalculator.isWarningLevel
-            ? DriverAlertState.drowsy
-            : DriverAlertState.normal;
-
-        return _buildResult(
-          continuousClosed: Duration.zero,
-          continuousOpen: openDuration,
-          perclos: perclos,
-          isHeadNod: isHeadNodding,
           shouldTriggerAlarm: false,
           shouldStopAlarm: false,
-          message: _currentState == DriverAlertState.drowsy
-              ? '⚠️ تحذير: مستوى إجهاد مرتفع (PERCLOS)'
-              : 'السائق مستيقظ',
+          message: 'جاري تأكيد حالة العينين...',
+          openRatio: openRatio,
+          closedRatio: closedRatio,
+          unknownRatio: unknownRatio,
+          emaOpenConfidence: _emaOpenConfidence,
         );
       }
+
+      _closedStartedAt = null;
+      _openStartedAt ??= currentNow;
+      final openDuration = currentNow.difference(_openStartedAt!);
+
+      _currentState = _perclosCalculator.isWarningLevel
+          ? DriverAlertState.drowsy
+          : DriverAlertState.normal;
+
+      return _buildResult(
+        continuousClosed: Duration.zero,
+        continuousOpen: openDuration,
+        perclos: perclos,
+        isHeadNod: isHeadNodding,
+        shouldTriggerAlarm: false,
+        shouldStopAlarm: false,
+        message: _currentState == DriverAlertState.drowsy
+            ? '⚠️ تحذير: مستوى إجهاد مرتفع (PERCLOS)'
+            : 'السائق مستيقظ',
+        openRatio: openRatio,
+        closedRatio: closedRatio,
+        unknownRatio: unknownRatio,
+        emaOpenConfidence: _emaOpenConfidence,
+      );
     }
   }
 
@@ -271,6 +469,11 @@ class DrowsinessAnalyzer {
     bool shouldTriggerAlarm = false,
     bool shouldStopAlarm = false,
     required String message,
+    double openRatio = 0.0,
+    double closedRatio = 0.0,
+    double unknownRatio = 0.0,
+    double emaOpenConfidence = 0.0,
+    bool isRecovering = false,
   }) {
     return DrowsinessAnalysisResult(
       alertState: _currentState,
@@ -281,6 +484,11 @@ class DrowsinessAnalyzer {
       shouldTriggerAlarm: shouldTriggerAlarm,
       shouldStopAlarm: shouldStopAlarm,
       statusMessage: message,
+      openRatio: openRatio,
+      closedRatio: closedRatio,
+      unknownRatio: unknownRatio,
+      emaOpenConfidence: emaOpenConfidence,
+      isRecovering: isRecovering,
     );
   }
 }

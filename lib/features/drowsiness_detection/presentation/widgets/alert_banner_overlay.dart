@@ -120,6 +120,38 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
           ),
         );
 
+      case DriverAlertState.recovering:
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.watchingAmber.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: const [
+              BoxShadow(
+                color: AppColors.watchingAmberGlow,
+                blurRadius: 16,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.visibility_rounded, color: Colors.black87, size: 24),
+              SizedBox(width: 8),
+              Text(
+                'جاري تأكيد استيقاظ السائق...',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+            ],
+          ),
+        );
+
       case DriverAlertState.drowsy:
         return Container(
           width: double.infinity,

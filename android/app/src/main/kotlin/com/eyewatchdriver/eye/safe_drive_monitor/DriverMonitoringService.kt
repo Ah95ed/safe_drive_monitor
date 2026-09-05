@@ -22,10 +22,25 @@ class DriverMonitoringService : Service() {
 
         const val ACTION_START_MONITORING = "com.eyewatchdriver.eye.safe_drive_monitor.START_MONITORING"
         const val ACTION_STOP_MONITORING = "com.eyewatchdriver.eye.safe_drive_monitor.STOP_MONITORING"
+        const val ACTION_UPDATE_STATUS = "com.eyewatchdriver.eye.safe_drive_monitor.UPDATE_STATUS"
+        const val EXTRA_STATUS_TEXT = "extra_status_text"
 
         @Volatile
         var isServiceRunning: Boolean = false
             private set
+
+        fun updateStatus(context: Context, statusText: String) {
+            if (!isServiceRunning) return
+            try {
+                val intent = Intent(context, DriverMonitoringService::class.java).apply {
+                    action = ACTION_UPDATE_STATUS
+                    putExtra(EXTRA_STATUS_TEXT, statusText)
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to update notification status", e)
+            }
+        }
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -43,8 +58,28 @@ class DriverMonitoringService : Service() {
         Log.i(TAG, "DriverMonitoringService onStartCommand action: $action")
 
         if (action == ACTION_STOP_MONITORING) {
+            Log.i(TAG, "ACTION_STOP_MONITORING: Notifying Flutter and stopping service.")
+            try {
+                MainActivity.activeChannel?.invokeMethod("onNotificationStopRequested", null)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error notifying Flutter about notification stop", e)
+            }
             stopMonitoringService()
             return START_NOT_STICKY
+        }
+
+        if (action == ACTION_UPDATE_STATUS) {
+            val statusText = intent.getStringExtra(EXTRA_STATUS_TEXT)
+            if (!statusText.isNullOrBlank() && isServiceRunning) {
+                try {
+                    val notification = buildNotification(statusText)
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.notify(NOTIFICATION_ID, notification)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to update notification", e)
+                }
+            }
+            return START_STICKY
         }
 
         startForegroundWithNotification()

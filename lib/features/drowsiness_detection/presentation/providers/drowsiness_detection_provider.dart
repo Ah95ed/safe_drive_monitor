@@ -52,6 +52,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   bool _isDetectingFace = false;
   bool _isPowerSaverMode = false;
   bool _isIgnoringBatteryOptimizations = false;
+  bool _stopping = false;
   Object? _error;
   String _statusMessage = 'جاهز لبدء المراقبة';
 
@@ -117,7 +118,16 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     _alarmController = alarmController ??
         AlarmController(_audioAlarmService, _hapticService);
     _syncConfigWithClassifier();
+    _foregroundService.setNotificationStopHandler(() async {
+      AppLogger.info(_tag, 'Notification Stop event received. Executing hardStopAll().');
+      await hardStopAll();
+    });
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// Delegates to native Android to move the app task to background without killing the session.
+  Future<bool> moveTaskToBackground() async {
+    return await _foregroundService.moveTaskToBackground();
   }
 
   void _syncConfigWithClassifier() {
@@ -325,34 +335,74 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     }
   }
 
-  /// Stop monitoring, camera stream, watchdog, alarms, and native service.
-  Future<void> stopMonitoring() async {
-    if (!_isMonitoring) return;
+  /// Idempotent, safe, and unconditional complete halt of all monitoring subsystems.
+  Future<void> hardStopAll() async {
+    if (_stopping) return;
+    _stopping = true;
 
+    AppLogger.info(_tag, 'Executing hardStopAll...');
     try {
       _isMonitoring = false;
-      _watchdog.stop();
-      await _cameraService.stopImageStream();
 
-      // Unconditionally stop all audio and haptics across all services
-      await _alarmController.stop();
-      await _audioAlarmService.stopAlarm();
-      await _hapticService.stopAlarmHaptic();
+      // 1. Stop safety watchdog
+      try {
+        _watchdog.stop();
+      } catch (e) {
+        AppLogger.warning(_tag, 'Watchdog stop error: $e');
+      }
 
-      await _foregroundService.stopForegroundService();
+      // 2. Stop camera stream
+      try {
+        await _cameraService.stopImageStream();
+      } catch (e) {
+        AppLogger.warning(_tag, 'Camera stop error: $e');
+      }
 
+      // 3. Force stop alarms and haptics unconditionally
+      try {
+        await _alarmController.forceStop();
+      } catch (e) {
+        AppLogger.warning(_tag, 'AlarmController forceStop error: $e');
+      }
+      try {
+        await _audioAlarmService.stopAlarm();
+      } catch (e) {
+        AppLogger.warning(_tag, 'AudioAlarmService stop error: $e');
+      }
+      try {
+        await _hapticService.stopAlarmHaptic();
+      } catch (e) {
+        AppLogger.warning(_tag, 'HapticService stop error: $e');
+      }
+
+      // 4. Stop foreground service and remove notification
+      try {
+        await _foregroundService.stopForegroundService();
+      } catch (e) {
+        AppLogger.warning(_tag, 'ForegroundService stop error: $e');
+      }
+
+      // 5. Reset analyzers, trackers, lighting
       _drowsinessAnalyzer.reset();
       _faceTracker.reset();
       _lightingManager.reset();
       _currentDriverFace = null;
       _alertState = DriverAlertState.normal;
       _sessionState = DrivingSessionState.idle();
-      _statusMessage = 'تم إيقاف المراقبة';
-      AppLogger.info(_tag, 'Monitoring session stopped.');
-      notifyListeners();
+      _statusMessage = 'تم إيقاف المراقبة بنجاح';
+
+      AppLogger.info(_tag, 'hardStopAll completed cleanly.');
     } catch (e, st) {
-      AppLogger.error(_tag, 'Stop monitoring error', e, st);
+      AppLogger.error(_tag, 'Fatal error during hardStopAll', e, st);
+    } finally {
+      _stopping = false;
+      notifyListeners();
     }
+  }
+
+  /// Stop monitoring alias delegating to hardStopAll().
+  Future<void> stopMonitoring() async {
+    await hardStopAll();
   }
 
   /// Handles health shifts from the watchdog.
@@ -368,15 +418,18 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _statusMessage = 'تنبيه عطل فني: ${issue.arabicDescription}';
       _audioAlarmService.playTechnicalWarning();
       _hapticService.playWarningHaptic();
+      _foregroundService.updateNotificationStatus('⚠️ توقف نظام المراقبة: ${issue.arabicDescription}');
     } else if (health == MonitoringHealth.degraded) {
       _statusMessage = 'انخفاض كفاءة: ${issue.arabicDescription}';
       if (issue == MonitoringIssue.insufficientLight) {
         _hapticService.playWarningHaptic();
       }
+      _foregroundService.updateNotificationStatus('انخفاض كفاءة: ${issue.arabicDescription}');
     } else {
       _statusMessage = _alertState == DriverAlertState.normal
           ? 'المراقبة نشطة ومستقرة'
           : _statusMessage;
+      _foregroundService.updateNotificationStatus('مراقبة يقظة السائق نشطة ومستمرة لحمايتك');
     }
 
     notifyListeners();
@@ -577,14 +630,25 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _statusMessage = analysisResult.statusMessage;
       _lastPrediction = prediction;
 
+      // If recovering, temporarily suspend vibration so camera has stable, non-blurred frames!
+      if (_alertState == DriverAlertState.recovering || analysisResult.isRecovering) {
+        await _hapticService.suspendHapticTemporarily();
+      }
+
       // Guard against race condition if monitoring stopped while frame was in flight
       if (_disposed || !_isMonitoring) {
-        await _alarmController.stop();
+        await _alarmController.forceStop();
         await _audioAlarmService.stopAlarm();
         await _hapticService.stopAlarmHaptic();
         return;
       }
       await _alarmController.sync(_alertState);
+
+      // Single source of truth update
+      _sessionState = _sessionState.copyWith(
+        alertState: _alertState,
+        alarmPlaying: _alarmController.isPlaying,
+      );
 
       totalStopwatch.stop();
       _totalFrameProcessingTime = totalStopwatch.elapsed;
@@ -659,7 +723,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     required DrowsinessAnalysisResult analysisResult,
     required bool alarmPlaying,
   }) {
-    // 1. Structured log per Requirement 1
+    // 1. Structured log per Phase 6
     AppLogger.info(
       'BACKGROUND_DEBUG',
       'timestamp=${prediction.timestamp.toIso8601String()} '
@@ -667,29 +731,41 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       'openScore=${prediction.openScore.toStringAsFixed(3)} '
       'closedScore=${prediction.closedScore.toStringAsFixed(3)} '
       'confidence=${prediction.confidence.toStringAsFixed(3)} '
+      'openRatio=${analysisResult.openRatio.toStringAsFixed(2)} '
+      'closedRatio=${analysisResult.closedRatio.toStringAsFixed(2)} '
+      'unknownRatio=${analysisResult.unknownRatio.toStringAsFixed(2)} '
+      'emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)} '
       'DriverAlertState=${analysisResult.alertState.name} '
+      'isRecovering=${analysisResult.isRecovering} '
       'openDuration=${analysisResult.continuousOpenDuration.inMilliseconds}ms '
       'closedDuration=${analysisResult.continuousClosedDuration.inMilliseconds}ms '
       'alarmPlaying=$alarmPlaying '
       'AppLifecycleState=${_currentLifecycleState.name}',
     );
 
-    // 2. High-visibility log per Requirement 11
+    // 2. High-visibility log per Phase 6
     if (prediction.state == EyeState.open) {
       final buffer = StringBuffer()
         ..writeln('BG prediction=OPEN')
-        ..writeln('confidence=${prediction.confidence.toStringAsFixed(2)}')
-        ..writeln('openDuration=${analysisResult.continuousOpenDuration.inMilliseconds}ms');
+        ..writeln('open=${prediction.openScore.toStringAsFixed(2)}')
+        ..writeln('closed=${prediction.closedScore.toStringAsFixed(2)}')
+        ..writeln('openRatio=${analysisResult.openRatio.toStringAsFixed(2)}')
+        ..writeln('emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)}')
+        ..writeln('recoveryWindow=${analysisResult.continuousOpenDuration.inMilliseconds}ms');
 
       if (analysisResult.shouldStopAlarm) {
         buffer
-          ..writeln('RECOVERY_TRIGGERED')
-          ..writeln('alertState=NORMAL')
+          ..writeln('BG RECOVERY CONFIRMED')
+          ..writeln('state=NORMAL')
           ..writeln('stopAlarm()')
           ..writeln('alarmPlaying=false');
+      } else if (analysisResult.alertState == DriverAlertState.recovering) {
+        buffer
+          ..writeln('state=RECOVERING')
+          ..writeln('alarmPlaying=$alarmPlaying');
       } else {
         buffer
-          ..writeln('alertState=${analysisResult.alertState.name.toUpperCase()}')
+          ..writeln('state=${analysisResult.alertState.name.toUpperCase()}')
           ..writeln('alarmPlaying=$alarmPlaying');
       }
 
@@ -777,7 +853,16 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         notifyListeners();
         break;
       case AppLifecycleState.detached:
-        disposeResources();
+        // Decouple UI lifecycle from driving session lifecycle per Phase 2:
+        // Do NOT automatically destroy monitoring runtime if driving session is active!
+        if (!_isMonitoring) {
+          disposeResources();
+        } else {
+          AppLogger.warning(
+            _tag,
+            'UI detached while driving session is ACTIVE. Monitoring runtime preserved in foreground.',
+          );
+        }
         break;
     }
   }

@@ -10,7 +10,9 @@ void main() {
     late ImagePreprocessor preprocessor;
 
     setUp(() {
-      preprocessor = ImagePreprocessor();
+      preprocessor = ImagePreprocessor(
+        normalization: ModelInputNormalization.minusOneToOne,
+      );
     });
 
     test('Output buffer size matches exactly 320x320x3 (307200 floats)', () {

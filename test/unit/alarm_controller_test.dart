@@ -42,16 +42,31 @@ class FakeHapticService implements HapticService {
   int startAlarmCount = 0;
   int stopAlarmCount = 0;
   int warningCount = 0;
+  int suspendCount = 0;
   int disposeCount = 0;
+  bool _vibrating = false;
+
+  @override
+  bool get isVibrating => _vibrating;
 
   @override
   Future<void> startAlarmHaptic() async {
     startAlarmCount++;
+    _vibrating = true;
   }
 
   @override
   Future<void> stopAlarmHaptic() async {
     stopAlarmCount++;
+    _vibrating = false;
+  }
+
+  @override
+  Future<void> suspendHapticTemporarily({
+    Duration duration = const Duration(milliseconds: 350),
+  }) async {
+    suspendCount++;
+    _vibrating = false;
   }
 
   @override
@@ -62,6 +77,7 @@ class FakeHapticService implements HapticService {
   @override
   Future<void> dispose() async {
     disposeCount++;
+    _vibrating = false;
   }
 }
 

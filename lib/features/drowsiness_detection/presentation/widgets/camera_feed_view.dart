@@ -44,6 +44,16 @@ class CameraFeedView extends StatelessWidget {
           ),
         ];
         break;
+      case DriverAlertState.recovering:
+        borderColor = AppColors.watchingAmber;
+        glow = const [
+          BoxShadow(
+            color: AppColors.watchingAmberGlow,
+            blurRadius: 18,
+            spreadRadius: 3,
+          ),
+        ];
+        break;
       case DriverAlertState.drowsy:
         borderColor = AppColors.drowsyOrange;
         glow = const [

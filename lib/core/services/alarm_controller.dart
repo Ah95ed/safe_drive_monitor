@@ -24,7 +24,9 @@ class AlarmController {
   /// - When [state] is NOT [DriverAlertState.alarm] and alarm is active: stops audio & haptics.
   /// - Safe to invoke on every single frame/prediction.
   Future<void> sync(DriverAlertState state) async {
-    final shouldPlay = state == DriverAlertState.alarm;
+    final shouldPlay =
+        state == DriverAlertState.alarm ||
+        state == DriverAlertState.recovering;
 
     if (shouldPlay && !_isPlaying) {
       _isPlaying = true;
@@ -61,6 +63,11 @@ class AlarmController {
     } catch (e, st) {
       AppLogger.error(_tag, 'Failed during explicit stop', e, st);
     }
+  }
+
+  /// Force-stops alarm audio and haptic feedback. Idempotent.
+  Future<void> forceStop() async {
+    await stop();
   }
 
   /// Releases resources held by the controller.

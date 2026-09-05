@@ -128,6 +128,9 @@ class MonitoringWatchdog {
     return (health: MonitoringHealth.healthy, issue: MonitoringIssue.none);
   }
 
+  Future<void> Function()? _onCameraStallDetected;
+  void Function(MonitoringHealth health, MonitoringIssue issue)? _onHealthChanged;
+
   /// Starts the watchdog monitor with callbacks for stall recovery and health shifts.
   void start({
     required Future<void> Function() onCameraStallDetected,
@@ -142,41 +145,48 @@ class MonitoringWatchdog {
     _lastServiceHeartbeatAt = now;
     _currentHealth = MonitoringHealth.healthy;
     _currentIssue = MonitoringIssue.none;
+    _onCameraStallDetected = onCameraStallDetected;
+    _onHealthChanged = onHealthChanged;
 
-    _timer = Timer.periodic(config.checkInterval, (timer) async {
-      if (!_isRunning) return;
-
-      final checkTime = DateTime.now();
-      final eval = evaluateHealth(checkTime);
-
-      if (eval.health != _currentHealth || eval.issue != _currentIssue) {
-        _currentHealth = eval.health;
-        _currentIssue = eval.issue;
-        AppLogger.warning(
-          _tag,
-          'Monitoring Health Transition: [${_currentHealth.name}] Issue: [${_currentIssue.name}]',
-        );
-        onHealthChanged?.call(_currentHealth, _currentIssue);
-      }
-
-      // Trigger automatic camera recovery if camera stalled
-      if (eval.issue == MonitoringIssue.cameraStalled) {
-        _stallRecoveryCount++;
-        AppLogger.warning(
-          _tag,
-          'Camera frame stall confirmed. Triggering recovery #$_stallRecoveryCount...',
-        );
-        // Reset timestamp to give recovery time to take effect
-        _lastCameraFrameAt = checkTime;
-        try {
-          await onCameraStallDetected();
-        } catch (e, st) {
-          AppLogger.error(_tag, 'Watchdog camera recovery failed', e, st);
-        }
-      }
+    _timer = Timer.periodic(config.checkInterval, (_) {
+      checkHealthTick();
     });
 
     AppLogger.info(_tag, 'Monitoring watchdog started.');
+  }
+
+  /// Evaluates health immediately at [now], firing callbacks if health state transitioned.
+  Future<void> checkHealthTick({DateTime? now}) async {
+    if (!_isRunning) return;
+
+    final checkTime = now ?? DateTime.now();
+    final eval = evaluateHealth(checkTime);
+
+    if (eval.health != _currentHealth || eval.issue != _currentIssue) {
+      _currentHealth = eval.health;
+      _currentIssue = eval.issue;
+      AppLogger.warning(
+        _tag,
+        'Monitoring Health Transition: [${_currentHealth.name}] Issue: [${_currentIssue.name}]',
+      );
+      _onHealthChanged?.call(_currentHealth, _currentIssue);
+    }
+
+    // Trigger automatic camera recovery if camera stalled
+    if (eval.issue == MonitoringIssue.cameraStalled) {
+      _stallRecoveryCount++;
+      AppLogger.warning(
+        _tag,
+        'Camera frame stall confirmed. Triggering recovery #$_stallRecoveryCount...',
+      );
+      // Reset timestamp to give recovery time to take effect
+      _lastCameraFrameAt = checkTime;
+      try {
+        await _onCameraStallDetected?.call();
+      } catch (e, st) {
+        AppLogger.error(_tag, 'Watchdog camera recovery failed', e, st);
+      }
+    }
   }
 
   /// Stops the watchdog timer.
@@ -184,6 +194,8 @@ class MonitoringWatchdog {
     _isRunning = false;
     _timer?.cancel();
     _timer = null;
+    _onCameraStallDetected = null;
+    _onHealthChanged = null;
     _lastCameraFrameAt = null;
     _lastInferenceAt = null;
     _lastFaceDetectedAt = null;

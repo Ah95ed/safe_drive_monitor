@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 
 /// Represents the engineering health of the monitoring subsystem.
 /// Strictly separated from the driver's alertness state.
@@ -78,15 +79,18 @@ extension MonitoringIssueX on MonitoringIssue {
 }
 
 /// Immutable snapshot representing the active driving monitoring session.
+/// Serves as the Single Source of Truth for the driving session.
 @immutable
 class DrivingSessionState {
   final bool active;
-  final DateTime? startedAt;
+  final DriverAlertState alertState;
   final MonitoringHealth health;
   final MonitoringIssue issue;
+  final bool alarmPlaying;
   final bool foregroundServiceActive;
   final bool batteryOptimizationExempt;
   final bool wakeLockActive;
+  final DateTime? startedAt;
   final DateTime? lastCameraFrameAt;
   final DateTime? lastInferenceAt;
   final DateTime? lastFaceDetectedAt;
@@ -94,12 +98,14 @@ class DrivingSessionState {
 
   const DrivingSessionState({
     this.active = false,
-    this.startedAt,
+    this.alertState = DriverAlertState.normal,
     this.health = MonitoringHealth.healthy,
     this.issue = MonitoringIssue.none,
+    this.alarmPlaying = false,
     this.foregroundServiceActive = false,
     this.batteryOptimizationExempt = false,
     this.wakeLockActive = false,
+    this.startedAt,
     this.lastCameraFrameAt,
     this.lastInferenceAt,
     this.lastFaceDetectedAt,
@@ -129,12 +135,14 @@ class DrivingSessionState {
 
   DrivingSessionState copyWith({
     bool? active,
-    DateTime? startedAt,
+    DriverAlertState? alertState,
     MonitoringHealth? health,
     MonitoringIssue? issue,
+    bool? alarmPlaying,
     bool? foregroundServiceActive,
     bool? batteryOptimizationExempt,
     bool? wakeLockActive,
+    DateTime? startedAt,
     DateTime? lastCameraFrameAt,
     DateTime? lastInferenceAt,
     DateTime? lastFaceDetectedAt,
@@ -142,14 +150,16 @@ class DrivingSessionState {
   }) {
     return DrivingSessionState(
       active: active ?? this.active,
-      startedAt: startedAt ?? this.startedAt,
+      alertState: alertState ?? this.alertState,
       health: health ?? this.health,
       issue: issue ?? this.issue,
+      alarmPlaying: alarmPlaying ?? this.alarmPlaying,
       foregroundServiceActive:
           foregroundServiceActive ?? this.foregroundServiceActive,
       batteryOptimizationExempt:
           batteryOptimizationExempt ?? this.batteryOptimizationExempt,
       wakeLockActive: wakeLockActive ?? this.wakeLockActive,
+      startedAt: startedAt ?? this.startedAt,
       lastCameraFrameAt: lastCameraFrameAt ?? this.lastCameraFrameAt,
       lastInferenceAt: lastInferenceAt ?? this.lastInferenceAt,
       lastFaceDetectedAt: lastFaceDetectedAt ?? this.lastFaceDetectedAt,
@@ -164,12 +174,14 @@ class DrivingSessionState {
       other is DrivingSessionState &&
           runtimeType == other.runtimeType &&
           active == other.active &&
-          startedAt == other.startedAt &&
+          alertState == other.alertState &&
           health == other.health &&
           issue == other.issue &&
+          alarmPlaying == other.alarmPlaying &&
           foregroundServiceActive == other.foregroundServiceActive &&
           batteryOptimizationExempt == other.batteryOptimizationExempt &&
           wakeLockActive == other.wakeLockActive &&
+          startedAt == other.startedAt &&
           lastCameraFrameAt == other.lastCameraFrameAt &&
           lastInferenceAt == other.lastInferenceAt &&
           lastFaceDetectedAt == other.lastFaceDetectedAt &&
@@ -178,12 +190,14 @@ class DrivingSessionState {
   @override
   int get hashCode => Object.hash(
         active,
-        startedAt,
+        alertState,
         health,
         issue,
+        alarmPlaying,
         foregroundServiceActive,
         batteryOptimizationExempt,
         wakeLockActive,
+        startedAt,
         lastCameraFrameAt,
         lastInferenceAt,
         lastFaceDetectedAt,

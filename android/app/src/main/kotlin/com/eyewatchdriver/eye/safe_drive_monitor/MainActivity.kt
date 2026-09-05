@@ -13,13 +13,30 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.eyewatchdriver.eye.safe_drive_monitor/foreground_service"
+    companion object {
+        private const val CHANNEL = "com.eyewatchdriver.eye.safe_drive_monitor/foreground_service"
+
+        @Volatile
+        var activeChannel: MethodChannel? = null
+            private set
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        activeChannel = channel
+
+        channel.setMethodCallHandler { call, result ->
             when (call.method) {
+                "moveTaskToBackground" -> {
+                    result.success(moveTaskToBack(true))
+                }
+                "updateNotificationStatus" -> {
+                    val statusText = call.argument<String>("statusText") ?: ""
+                    DriverMonitoringService.updateStatus(this, statusText)
+                    result.success(true)
+                }
                 "startForegroundService" -> {
                     try {
                         val intent = Intent(this, DriverMonitoringService::class.java).apply {
@@ -55,6 +72,11 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        activeChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     private fun checkLowLightBoostSupport(): Boolean {

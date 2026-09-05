@@ -108,16 +108,16 @@ void main() {
           state: EyeState.closed, timeOffset: const Duration(milliseconds: 1600)));
       expect(analyzer.currentState, equals(DriverAlertState.alarm));
 
-      // Driver opens eyes at 1700ms (100ms open) -> still in alarm
+      // Driver opens eyes at 1700ms (100ms open) -> still in alarm/recovering
       final r1 = analyzer.processPrediction(createPrediction(
           state: EyeState.open, timeOffset: const Duration(milliseconds: 1700)));
-      expect(r1.alertState, equals(DriverAlertState.alarm));
+      expect(r1.alertState.isAlarm, isTrue);
       expect(r1.shouldStopAlarm, isFalse);
 
-      // Driver stays open until 2200ms (500ms open) -> still in alarm (< 1000ms recovery)
+      // Driver stays open until 2200ms (500ms open) -> still in alarm/recovering (< 1000ms recovery)
       final r2 = analyzer.processPrediction(createPrediction(
           state: EyeState.open, timeOffset: const Duration(milliseconds: 2200)));
-      expect(r2.alertState, equals(DriverAlertState.alarm));
+      expect(r2.alertState.isAlarm, isTrue);
       expect(r2.shouldStopAlarm, isFalse);
 
       // Driver stays open until 2800ms (1100ms open >= 1000ms recovery) -> RECOVERED!
@@ -280,12 +280,12 @@ void main() {
       await controller.sync(rOpen1.alertState);
       expect(alarmService.stopAlarmCalls, equals(0));
 
-      // OPEN 500ms at 2300ms
+      // OPEN 500ms at 2300ms (in recovery process, alarm still active)
       final rOpen2 = analyzer.processPrediction(createPrediction(
         state: EyeState.open,
         timeOffset: const Duration(milliseconds: 2300),
       ));
-      expect(rOpen2.alertState, equals(DriverAlertState.alarm));
+      expect(rOpen2.alertState.isAlarm, isTrue);
       await controller.sync(rOpen2.alertState);
       expect(alarmService.stopAlarmCalls, equals(0));
 
@@ -328,8 +328,8 @@ void main() {
         state: EyeState.open,
         timeOffset: const Duration(milliseconds: 2000),
       ));
-      expect(rOpen1.alertState, equals(DriverAlertState.alarm));
-      expect(rOpen2.alertState, equals(DriverAlertState.alarm));
+      expect(rOpen1.alertState.isAlarm, isTrue);
+      expect(rOpen2.alertState.isAlarm, isTrue);
 
       // CLOSED arrives -> cancels recovery
       final rClosed = analyzer.processPrediction(createPrediction(

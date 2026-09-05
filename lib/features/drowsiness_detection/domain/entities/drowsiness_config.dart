@@ -39,6 +39,27 @@ class DrowsinessConfig {
   /// Accelerated inference interval in alert / watching state (e.g. 60ms ~ 16 FPS).
   final Duration alertInferenceInterval;
 
+  /// Rolling time window duration for alarm recovery evaluation (default 900ms).
+  final Duration recoveryWindowDuration;
+
+  /// Minimum ratio of OPEN predictions in the rolling recovery window (default 0.70 = 70%).
+  final double recoveryMinOpenRatio;
+
+  /// Minimum Exponential Moving Average (EMA) open confidence for recovery (default 0.60).
+  final double recoveryMinEmaConfidence;
+
+  /// Recent window duration where no strong CLOSED prediction is permitted during recovery (default 250ms).
+  final Duration recoveryRecentClosedWindow;
+
+  /// Confidence threshold above which a recent CLOSED prediction aborts recovery (default 0.65).
+  final double recoveryRecentClosedMinConfidence;
+
+  /// Maximum allowed ratio of UNKNOWN predictions before recovery confirmation is paused (default 0.40).
+  final double recoveryMaxUnknownRatio;
+
+  /// Smoothing factor alpha for EMA open confidence (default 0.65).
+  final double recoveryEmaAlpha;
+
   const DrowsinessConfig({
     this.watchingThreshold = const Duration(milliseconds: 350),
     this.drowsyThreshold = const Duration(milliseconds: 800),
@@ -53,6 +74,13 @@ class DrowsinessConfig {
     this.enableAdaptiveInference = true,
     this.normalInferenceInterval = const Duration(milliseconds: 220),
     this.alertInferenceInterval = const Duration(milliseconds: 90),
+    this.recoveryWindowDuration = const Duration(milliseconds: 900),
+    this.recoveryMinOpenRatio = 0.70,
+    this.recoveryMinEmaConfidence = 0.60,
+    this.recoveryRecentClosedWindow = const Duration(milliseconds: 250),
+    this.recoveryRecentClosedMinConfidence = 0.65,
+    this.recoveryMaxUnknownRatio = 0.40,
+    this.recoveryEmaAlpha = 0.65,
   });
 
   DrowsinessConfig copyWith({
@@ -69,6 +97,13 @@ class DrowsinessConfig {
     bool? enableAdaptiveInference,
     Duration? normalInferenceInterval,
     Duration? alertInferenceInterval,
+    Duration? recoveryWindowDuration,
+    double? recoveryMinOpenRatio,
+    double? recoveryMinEmaConfidence,
+    Duration? recoveryRecentClosedWindow,
+    double? recoveryRecentClosedMinConfidence,
+    double? recoveryMaxUnknownRatio,
+    double? recoveryEmaAlpha,
   }) {
     return DrowsinessConfig(
       watchingThreshold: watchingThreshold ?? this.watchingThreshold,
@@ -93,6 +128,20 @@ class DrowsinessConfig {
           normalInferenceInterval ?? this.normalInferenceInterval,
       alertInferenceInterval:
           alertInferenceInterval ?? this.alertInferenceInterval,
+      recoveryWindowDuration:
+          recoveryWindowDuration ?? this.recoveryWindowDuration,
+      recoveryMinOpenRatio:
+          recoveryMinOpenRatio ?? this.recoveryMinOpenRatio,
+      recoveryMinEmaConfidence:
+          recoveryMinEmaConfidence ?? this.recoveryMinEmaConfidence,
+      recoveryRecentClosedWindow:
+          recoveryRecentClosedWindow ?? this.recoveryRecentClosedWindow,
+      recoveryRecentClosedMinConfidence:
+          recoveryRecentClosedMinConfidence ?? this.recoveryRecentClosedMinConfidence,
+      recoveryMaxUnknownRatio:
+          recoveryMaxUnknownRatio ?? this.recoveryMaxUnknownRatio,
+      recoveryEmaAlpha:
+          recoveryEmaAlpha ?? this.recoveryEmaAlpha,
     );
   }
 }

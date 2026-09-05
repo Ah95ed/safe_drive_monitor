@@ -63,6 +63,11 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
             statusText = '🚨 خطر: تم اكتشاف نوم أثناء القيادة!';
             statusIcon = Icons.warning_rounded;
             break;
+          case DriverAlertState.recovering:
+            hudColor = AppColors.watchingAmber;
+            statusText = 'جاري تأكيد استيقاظ السائق...';
+            statusIcon = Icons.visibility_rounded;
+            break;
           case DriverAlertState.drowsy:
             hudColor = AppColors.drowsyOrange;
             statusText = '⚠️ تحذير: علامات نعاس وإجهاد!';
