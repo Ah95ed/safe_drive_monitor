@@ -6,6 +6,7 @@ import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/models/eye_prediction_model.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/image_preprocessor.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/model_delivery_service.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/detection_pipeline.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/model_output_mode.dart';
@@ -112,10 +113,22 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
 
     try {
       final options = InterpreterOptions()..threads = 2;
-      _interpreter = await Interpreter.fromAsset(
-        ModelConstants.modelAssetPath,
-        options: options,
-      );
+
+      if (ModelConstants.modelAssetPath.endsWith('.enc')) {
+        final decryptedModelBytes =
+            await ModelDeliveryService.loadAndDecryptModelAsset(
+          assetPath: ModelConstants.modelAssetPath,
+        );
+        _interpreter = Interpreter.fromBuffer(
+          decryptedModelBytes,
+          options: options,
+        );
+      } else {
+        _interpreter = await Interpreter.fromAsset(
+          ModelConstants.modelAssetPath,
+          options: options,
+        );
+      }
 
       // Pre-allocate tensors on load
       _interpreter!.allocateTensors();

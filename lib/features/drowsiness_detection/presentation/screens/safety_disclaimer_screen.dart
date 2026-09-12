@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 import 'package:safe_drive_monitor/app/theme/app_typography.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
+import 'package:safe_drive_monitor/features/onboarding/presentation/screens/onboarding_screen.dart';
 
 class SafetyDisclaimerDialog extends StatelessWidget {
   const SafetyDisclaimerDialog({super.key});
@@ -79,6 +80,25 @@ class SafetyDisclaimerDialog extends StatelessWidget {
             child: const Text(
               'أوافق وأتعهد بالقيادة بأمان',
               style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton.icon(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const OnboardingScreen(isFirstLaunch: false),
+                ),
+              );
+            },
+            icon: const Icon(Icons.menu_book_rounded, size: 18, color: AppColors.primaryCyan),
+            label: const Text(
+              'عرض دليل البداية (Onboarding Guide)',
+              style: TextStyle(color: AppColors.primaryCyan, fontSize: 13),
             ),
           ),
         ),

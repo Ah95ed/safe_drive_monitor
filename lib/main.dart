@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:safe_drive_monitor/app/app.dart';
+import 'package:safe_drive_monitor/features/onboarding/data/services/onboarding_preferences_service.dart';
 
 Future<void> main() async {
   await runZonedGuarded<Future<void>>(
@@ -29,7 +30,10 @@ Future<void> main() async {
         DeviceOrientation.portraitUp,
       ]);
 
-      runApp(const SafeDriveApp());
+      final onboardingCompleted =
+          await OnboardingPreferencesService.isOnboardingCompleted();
+
+      runApp(SafeDriveApp(initialOnboardingCompleted: onboardingCompleted));
     },
     (error, stack) async {
       log('Zoned error: $error', error: error, stackTrace: stack);

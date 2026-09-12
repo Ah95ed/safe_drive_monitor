@@ -38,6 +38,7 @@ app.*.symbols
 
 # Obfuscation related
 app.*.map.json
+private_build_symbols/
 
 # Android Studio will place build artifacts here
 /android/app/debug
@@ -48,3 +49,10 @@ app.*.map.json
 android/key.properties
 android/app/*.jks
 android/app/*.keystore
+
+# DriveAlert private security material
+secrets/
+*.local.env
+*.private.key
+*.private.pem
+.wrangler/

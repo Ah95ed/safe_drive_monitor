@@ -1,0 +1,10 @@
+{
+  "model_id": "drivealert-model-v1",
+  "version": "1.0.0",
+  "algorithm": "AES-256-GCM",
+  "sha256": "90909fc26dc9217c2948879af72b72d94c55ef97b47e7a76a11e11fc193f5918",
+  "encrypted_sha256": "d916701d89db7018979d24d81db42519f5f43e6b7cc0e535bc884904914b5f44",
+  "file_size": 3621040,
+  "timestamp": "2026-09-12T20:49:17.420Z",
+  "signature": "WEknLuHlDeHqzIta0NDkSl1nizGPYdFYFfXSICvU7aQiKaWt/xmrpYWHvtXCMONEXm4tOtWMGhA7g4ISYsrmCg=="
+}

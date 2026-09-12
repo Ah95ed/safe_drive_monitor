@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "drivealert-model-service",
+  "main": "src/index.js",
+  "compatibility_date": "2024-09-23",
+  "account_id": "ea4af2dab95733aa525d7a8ac1578691",
+  "r2_buckets": [
+    {
+      "binding": "MODELS_BUCKET",
+      "bucket_name": "safe-drive-monitor"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
