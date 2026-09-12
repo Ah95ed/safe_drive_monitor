@@ -17,6 +17,7 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/drowsiness_config.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/model_output_mode.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/ready_model.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/roi_strategy.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/camera_stream_watchdog.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/driver_face_tracker.dart';
@@ -243,7 +244,12 @@ class FakeEyeStateClassifier implements EyeStateClassifier {
   set roiStrategy(RoiStrategy value) {}
 
   @override
-  Future<void> load() async {
+  Future<void> load({ReadyModel? readyModel}) async {
+    isLoaded = true;
+  }
+
+  @override
+  Future<void> initializeWithModel(ReadyModel readyModel) async {
     isLoaded = true;
   }
 

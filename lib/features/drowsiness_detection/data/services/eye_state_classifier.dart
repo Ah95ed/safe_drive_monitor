@@ -6,10 +6,11 @@ import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/models/eye_prediction_model.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/image_preprocessor.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/model_delivery_service.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/secure_model_manager.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/detection_pipeline.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/model_output_mode.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/ready_model.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/roi_strategy.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -32,7 +33,8 @@ abstract class EyeStateClassifier {
   set useDirectFastPipeline(bool value);
   set roiStrategy(RoiStrategy value);
 
-  Future<void> load();
+  Future<void> load({ReadyModel? readyModel});
+  Future<void> initializeWithModel(ReadyModel readyModel);
   Future<EyePrediction> classify(
     CameraImage image, {
     int sensorRotation = 0,
@@ -107,28 +109,42 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     _preprocessor.pipeline = pipeline;
   }
 
+  ReadyModel? _activeModel;
+
   @override
-  Future<void> load() async {
+  Future<void> initializeWithModel(ReadyModel readyModel) async {
+    _activeModel = readyModel;
+    await _loadInterpreterFromBytes(readyModel.bytes);
+  }
+
+  @override
+  Future<void> load({ReadyModel? readyModel}) async {
     if (_interpreter != null) return;
+    if (readyModel != null) {
+      await initializeWithModel(readyModel);
+      return;
+    }
 
+    final modelManager = SecureModelManager();
+    if (modelManager.isModelReady && modelManager.readyModel != null) {
+      await initializeWithModel(modelManager.readyModel!);
+      return;
+    }
+
+    AppLogger.info(_tag, 'Requesting model bootstrap from SecureModelManager...');
+    final model = await modelManager.initialize();
+    await initializeWithModel(model);
+  }
+
+  Future<void> _loadInterpreterFromBytes(Uint8List modelBytes) async {
     try {
-      final options = InterpreterOptions()..threads = 2;
-
-      if (ModelConstants.modelAssetPath.endsWith('.enc')) {
-        final decryptedModelBytes =
-            await ModelDeliveryService.loadAndDecryptModelAsset(
-          assetPath: ModelConstants.modelAssetPath,
-        );
-        _interpreter = Interpreter.fromBuffer(
-          decryptedModelBytes,
-          options: options,
-        );
-      } else {
-        _interpreter = await Interpreter.fromAsset(
-          ModelConstants.modelAssetPath,
-          options: options,
-        );
+      if (_interpreter != null) {
+        _interpreter!.close();
+        _interpreter = null;
       }
+
+      final options = InterpreterOptions()..threads = 2;
+      _interpreter = Interpreter.fromBuffer(modelBytes, options: options);
 
       // Pre-allocate tensors on load
       _interpreter!.allocateTensors();
@@ -185,7 +201,6 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       _architecture = isYolo ? ModelArchitecture.yoloDetector : ModelArchitecture.classification;
 
       // 4. Set appropriate normalization:
-      // YOLO models use [0.0, 1.0] (zeroToOne), while older TF classifier uses [-1.0, 1.0] (minusOneToOne)
       if (isYolo) {
         _preprocessor.normalization = ModelInputNormalization.zeroToOne;
       } else {
@@ -193,7 +208,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       }
 
       AppLogger.info(
-        _tag,
+        'CLASSIFIER_READY',
         'TFLite model loaded successfully: architecture=${_architecture.name}, '
         'input=${inputTensor.shape} (${inputTensor.type.name}), '
         'output=${outputTensor.shape} (${outputTensor.type.name}), '
@@ -202,7 +217,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     } catch (e, st) {
       AppLogger.error(_tag, 'Failed to load or validate TFLite model', e, st);
       if (e is AppException) rethrow;
-      throw ModelLoadException('Failed to load eye state TFLite model', e);
+      throw ModelLoadException('Failed to load eye state TFLite model: $e', e);
     }
   }
 
@@ -417,7 +432,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
   Future<void> reinitialize() async {
     AppLogger.info(_tag, 'Reinitializing TFLite interpreter...');
     await dispose();
-    await load();
+    await load(readyModel: _activeModel);
   }
 
   @override

@@ -4,7 +4,9 @@ import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/widgets.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
+import 'package:safe_drive_monitor/core/constants/model_state.dart';
 import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/secure_model_manager.dart';
 import 'package:safe_drive_monitor/core/services/alarm_controller.dart';
 import 'package:safe_drive_monitor/core/services/audio_alarm_service.dart';
 import 'package:safe_drive_monitor/core/services/battery_optimization_service.dart';
@@ -37,6 +39,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
 
   final CameraService _cameraService;
   final EyeStateClassifier _classifier;
+  final SecureModelManager _modelManager;
   final FaceDetectionService _faceDetectionService;
   final DriverFaceTracker _faceTracker;
   final MonitoringWatchdog _watchdog;
@@ -117,6 +120,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   DrowsinessDetectionProvider({
     CameraService? cameraService,
     EyeStateClassifier? classifier,
+    SecureModelManager? modelManager,
     FaceDetectionService? faceDetectionService,
     DriverFaceTracker? faceTracker,
     MonitoringWatchdog? watchdog,
@@ -131,6 +135,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     AdaptiveInferenceScheduler? scheduler,
   }) : _cameraService = cameraService ?? AppCameraService(),
        _classifier = classifier ?? TfliteEyeStateClassifier(),
+       _modelManager = modelManager ?? SecureModelManager(),
        _faceDetectionService =
            faceDetectionService ?? MlKitFaceDetectionService(),
        _faceTracker = faceTracker ?? DriverFaceTracker(),
@@ -148,6 +153,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     _alarmController =
         alarmController ?? AlarmController(_audioAlarmService, _hapticService);
     _syncConfigWithClassifier();
+    _modelManager.addListener(_onModelManagerStateChanged);
     _foregroundService.setNotificationStopHandler(() async {
       AppLogger.info(
         _tag,
@@ -156,6 +162,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       await hardStopAll();
     });
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  void _onModelManagerStateChanged() {
+    if (_disposed) return;
+    if (!_isInitialized) {
+      _statusMessage = _modelManager.state.arabicLabel;
+    }
+    notifyListeners();
   }
 
   @override
@@ -390,6 +404,13 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   bool get isSafetyOverrideActive => _isSafetyOverrideActive;
   bool get isLegacyAlarmTriggered => _alertState.isAlarm;
 
+  SecureModelManager get modelManager => _modelManager;
+  ModelState get modelState => _modelManager.state;
+  double get modelDownloadProgress => _modelManager.downloadProgress;
+  String? get modelErrorCode => _modelManager.lastErrorCode;
+  String? get modelErrorMessage => _modelManager.lastErrorMessage;
+  bool get isModelReady => _modelManager.isModelReady && _classifier.isLoaded;
+
   @override
   void notifyListeners() {
     if (!_disposed) {
@@ -397,40 +418,68 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     }
   }
 
-  /// Initialize Camera, Model, and Battery readiness.
+  /// Initialize AI Model first, then Camera & Battery readiness.
   Future<void> initialize() async {
     if (_disposed || _isInitialized) return;
     _error = null;
-    _statusMessage = 'جاري تهيئة الكاميرا ونموذج الذكاء الاصطناعي...';
+    _statusMessage = _modelManager.state.arabicLabel;
     notifyListeners();
 
     try {
+      // 1. Model Bootstrap first (Cloudflare download or local active check)
+      AppLogger.info(_tag, 'Starting secure model bootstrap...');
+      final readyModel = await _modelManager.initialize();
+
+      if (_disposed) return;
+
+      // 2. Initialize classifier with verified ReadyModel
+      _statusMessage = 'جاري إعداد محرك الذكاء الاصطناعي...';
+      notifyListeners();
+      await _classifier.initializeWithModel(readyModel);
+
+      // 3. Initialize Camera & Battery readiness only after Model is ready
+      _statusMessage = 'جاري تهيئة الكاميرا...';
+      notifyListeners();
       final results = await Future.wait([
         _cameraService.initialize(lensDirection: CameraLensDirection.front),
-        _classifier.load(),
         _batteryOptService.isIgnoringBatteryOptimizations(),
       ]);
 
       if (_disposed) return;
-      _isIgnoringBatteryOptimizations = results[2] as bool;
+      _isIgnoringBatteryOptimizations = results[1] as bool;
       _syncConfigWithClassifier();
       _applyDetectionModeConfig();
       _isInitialized = true;
       _statusMessage = 'تمت التهيئة بنجاح. اضغط على زر البدء لبدء المراقبة.';
-      AppLogger.info(_tag, 'Drowsiness detection provider initialized.');
+      AppLogger.info(_tag, 'Drowsiness detection provider initialized successfully.');
       notifyListeners();
     } catch (e, st) {
       if (_disposed) return;
       _error = e;
-      _statusMessage = e is AppException ? e.message : 'فشل في تهيئة النظام';
-      AppLogger.error(_tag, 'Initialization error', e, st);
+      _statusMessage = _modelManager.lastErrorMessage ?? (e is AppException ? e.message : 'فشل في تهيئة النظام');
+      AppLogger.error(_tag, 'Initialization error: ${_modelManager.lastErrorCode ?? e}', e, st);
       notifyListeners();
     }
   }
 
+  /// Retries the AI model bootstrap and initialization sequence.
+  Future<void> retryModelBootstrap() async {
+    if (_disposed) return;
+    _error = null;
+    _isInitialized = false;
+    notifyListeners();
+    await initialize();
+  }
+
   /// Start monitoring, Foreground Camera Service, image stream and watchdog.
   Future<void> startMonitoring() async {
-    if (_isMonitoring || !_isInitialized) return;
+    if (_isMonitoring || !_isInitialized || !_modelManager.isModelReady || !_classifier.isLoaded) {
+      AppLogger.warning(
+        _tag,
+        'Cannot start monitoring: modelState=${_modelManager.state.name}, classifierLoaded=${_classifier.isLoaded}, isInitialized=$_isInitialized',
+      );
+      return;
+    }
 
     try {
       _error = null;
@@ -1272,6 +1321,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    _modelManager.removeListener(_onModelManagerStateChanged);
     WidgetsBinding.instance.removeObserver(this);
     disposeResources().catchError((e) {
       AppLogger.error(_tag, 'Async disposal error', e);

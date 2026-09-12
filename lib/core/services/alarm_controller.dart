@@ -55,7 +55,7 @@ class AlarmController {
       );
       await Future.wait([
         _alarmService.playAlarm(),
-        if (_hapticService != null) _hapticService.startAlarmHaptic(),
+        if (_hapticService != null) _hapticService!.startAlarmHaptic(),
       ]);
       return;
     }
@@ -68,7 +68,7 @@ class AlarmController {
       );
       await Future.wait([
         _alarmService.stopAlarm(),
-        if (_hapticService != null) _hapticService.stopAlarmHaptic(),
+        if (_hapticService != null) _hapticService!.stopAlarmHaptic(),
       ]);
     }
   }
@@ -81,7 +81,7 @@ class AlarmController {
     try {
       await Future.wait([
         _alarmService.stopAlarm(),
-        if (_hapticService != null) _hapticService.stopAlarmHaptic(),
+        if (_hapticService != null) _hapticService!.stopAlarmHaptic(),
       ]);
     } catch (e, st) {
       AppLogger.error(_tag, 'Failed during explicit stop', e, st);

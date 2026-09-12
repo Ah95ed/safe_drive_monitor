@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart' as crypto_lib;
 import 'package:flutter/services.dart';
 import 'package:safe_drive_monitor/core/constants/model_constants.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
@@ -44,8 +46,8 @@ class ModelDeliveryService {
     return true;
   }
 
-  /// Decrypts an encrypted model container (DAM1 format) using native hardware AES-256-GCM.
-  /// Accepts an optional [wrappedKeyBytes] (wrapped via Keystore) or [directKeyBytes].
+  /// Decrypts an encrypted model container (DAM1 format) using native hardware AES-256-GCM
+  /// or pure Dart cryptography fallback if platform channel is not available.
   static Future<Uint8List> decryptContainer(
     Uint8List encryptedBytes, {
     Uint8List? wrappedKeyBytes,
@@ -75,6 +77,12 @@ class ModelDeliveryService {
           'Unexpected decryption result format from platform channel: ${result.runtimeType}',
         );
       }
+    } on MissingPluginException catch (_) {
+      if (directKeyBytes != null) {
+        AppLogger.info(_tag, 'Platform channel unavailable; using pure Dart AES-256-GCM decryption');
+        return decryptContainerInDart(encryptedBytes, directKeyBytes);
+      }
+      rethrow;
     } on PlatformException catch (e) {
       AppLogger.error(_tag, 'Platform error during model decryption: ${e.message}', e);
       rethrow;
@@ -82,6 +90,33 @@ class ModelDeliveryService {
       AppLogger.error(_tag, 'Error decrypting model container', e, st);
       rethrow;
     }
+  }
+
+  /// Pure Dart AES-256-GCM decryption for tests and non-Android environments.
+  static Future<Uint8List> decryptContainerInDart(
+    Uint8List encryptedContainer,
+    Uint8List keyBytes,
+  ) async {
+    if (encryptedContainer.length < 32) {
+      throw const ModelSecurityException('Encrypted container too short');
+    }
+    final magic = utf8.decode(encryptedContainer.sublist(0, 4));
+    if (magic != 'DAM1') {
+      throw const ModelSecurityException('Invalid container format: magic mismatch');
+    }
+    final iv = encryptedContainer.sublist(4, 16);
+    final tag = encryptedContainer.sublist(16, 32);
+    final ciphertext = encryptedContainer.sublist(32);
+
+    final algorithm = crypto_lib.AesGcm.with256bits();
+    final secretKey = crypto_lib.SecretKey(keyBytes);
+    final secretBox = crypto_lib.SecretBox(
+      ciphertext,
+      nonce: iv,
+      mac: crypto_lib.Mac(tag),
+    );
+    final decrypted = await algorithm.decrypt(secretBox, secretKey: secretKey);
+    return Uint8List.fromList(decrypted);
   }
 
   /// Loads the encrypted model from assets, verifies its encrypted SHA-256 hash,

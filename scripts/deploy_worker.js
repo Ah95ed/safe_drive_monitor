@@ -53,6 +53,20 @@ try {
     }
   }
 
+  const modelAesKey = env.MODEL_AES_KEY_BASE64;
+  if (modelAesKey) {
+    console.log('Setting MODEL_AES_KEY_BASE64 on deployed worker...');
+    try {
+      execSync(`echo ${modelAesKey} | npx wrangler secret put MODEL_AES_KEY_BASE64`, {
+        cwd: path.resolve('cloudflare_worker'),
+        stdio: 'inherit'
+      });
+      console.log('MODEL_AES_KEY_BASE64 set successfully on Cloudflare Worker!');
+    } catch (secErr) {
+      console.warn('Could not set secret via pipe:', secErr.message);
+    }
+  }
+
 } catch (err) {
   console.error('Worker deployment error:', err.message);
 }

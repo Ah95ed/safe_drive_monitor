@@ -116,10 +116,13 @@ export default {
     if (path === '/v1/auth/attest' && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        const { deviceId, appPackage, appVersion, attestationToken } = body;
+        const { deviceId, appPackage, appVersion, attestationToken, devicePublicKey } = body;
+
+        console.log(`[CF_WORKER] Attestation request: package=${appPackage}, version=${appVersion}`);
 
         // Verify authorized client package
         if (appPackage !== 'com.eyewatchdriver.eye.safe_drive_monitor') {
+          console.warn(`[CF_WORKER] Unauthorized package: ${appPackage}`);
           return new Response(JSON.stringify({ error: 'Unauthorized client package' }), {
             status: 403,
             headers: securityHeaders,
@@ -133,16 +136,41 @@ export default {
         const signature = await generateHmacSha256(secret, payload);
         const token = `${payload}:${signature}`;
 
+        let wrappedKeyBase64 = null;
+        if (devicePublicKey && env.MODEL_AES_KEY_BASE64) {
+          try {
+            const binaryDer = Uint8Array.from(atob(devicePublicKey), c => c.charCodeAt(0));
+            const rsaKey = await crypto.subtle.importKey(
+              'spki',
+              binaryDer.buffer,
+              { name: 'RSA-OAEP', hash: 'SHA-256' },
+              false,
+              ['encrypt']
+            );
+            const aesKeyRaw = Uint8Array.from(atob(env.MODEL_AES_KEY_BASE64), c => c.charCodeAt(0));
+            const wrapped = await crypto.subtle.encrypt(
+              { name: 'RSA-OAEP' },
+              rsaKey,
+              aesKeyRaw
+            );
+            wrappedKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(wrapped)));
+            console.log('[CF_WORKER] Successfully wrapped model decryption key for device');
+          } catch (wrapErr) {
+            console.error('[CF_WORKER] Key wrapping failed:', wrapErr.message);
+          }
+        }
+
         return new Response(
           JSON.stringify({
             status: 'attested',
             token: token,
+            wrappedKey: wrappedKeyBase64,
             expiresAt: new Date(expiry).toISOString(),
           }),
           { status: 200, headers: securityHeaders }
         );
       } catch (err) {
-        console.error('Attestation error:', err);
+        console.error('[CF_WORKER] Attestation error:', err.message);
         return new Response(JSON.stringify({ error: 'Attestation verification failed' }), {
           status: 400,
           headers: securityHeaders,
@@ -208,7 +236,7 @@ export default {
       headers.set('Content-Disposition', 'attachment; filename="eye_detector_5n_320_float16.enc"');
       headers.set('Content-Length', modelObject.size.toString());
       headers.set('Cache-Control', 'private, no-transform, max-age=86400');
-      if (modelObject.httpEtag) headers.set('ETag', modelObject.httpEtag);
+      console.log(`[CF_WORKER] Authorized download: serving encrypted model (${modelObject.size} bytes)`);
 
       return new Response(modelObject.body, {
         status: 200,

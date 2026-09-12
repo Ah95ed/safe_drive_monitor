@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
+import 'package:safe_drive_monitor/core/constants/model_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/monitoring_health_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/providers/drowsiness_detection_provider.dart';
@@ -273,6 +275,109 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                   ),
                                 ),
 
+                               // AI Model Lifecycle Status Banner
+                              if (!provider.isModelReady)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: provider.modelState.isFailed
+                                        ? AppColors.alarmRed.withValues(alpha: 0.15)
+                                        : AppColors.primaryCyan.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: provider.modelState.isFailed
+                                          ? AppColors.alarmRed.withValues(alpha: 0.6)
+                                          : AppColors.primaryCyan.withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          if (provider.modelState.isBusy)
+                                            const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2.2,
+                                                color: AppColors.primaryCyan,
+                                              ),
+                                            )
+                                          else if (provider.modelState.isFailed)
+                                            const Icon(
+                                              Icons.error_outline_rounded,
+                                              color: AppColors.alarmRed,
+                                              size: 20,
+                                            )
+                                          else
+                                            const Icon(
+                                              Icons.cloud_download_rounded,
+                                              color: AppColors.primaryCyan,
+                                              size: 20,
+                                            ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              provider.modelState == ModelState.downloading
+                                                  ? 'جاري تنزيل نموذج الذكاء الاصطناعي... ${(provider.modelDownloadProgress * 100).toInt()}%'
+                                                  : provider.modelState.arabicLabel,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: provider.modelState.isFailed
+                                                    ? AppColors.alarmRed
+                                                    : AppColors.textPrimary,
+                                              ),
+                                            ),
+                                          ),
+                                          if (provider.modelState.isFailed)
+                                            TextButton.icon(
+                                              onPressed: () => provider.retryModelBootstrap(),
+                                              icon: const Icon(Icons.refresh, size: 16, color: AppColors.primaryCyan),
+                                              label: const Text(
+                                                'إعادة المحاولة',
+                                                style: TextStyle(
+                                                  color: AppColors.primaryCyan,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      if (provider.modelState == ModelState.downloading) ...[
+                                        const SizedBox(height: 8),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: LinearProgressIndicator(
+                                            value: provider.modelDownloadProgress > 0
+                                                ? provider.modelDownloadProgress
+                                                : null,
+                                            backgroundColor: Colors.white10,
+                                            color: AppColors.primaryCyan,
+                                            minHeight: 5,
+                                          ),
+                                        ),
+                                      ],
+                                      if (provider.modelState.isFailed &&
+                                          kDebugMode &&
+                                          provider.modelErrorCode != null) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Error Code: ${provider.modelErrorCode}',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey,
+                                            fontFamily: 'monospace',
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+
                               // System Health & Watchdog Issue Banner (Never Fail Silently)
                               if (provider.monitoringHealth != MonitoringHealth.healthy)
                                 Container(
@@ -363,7 +468,7 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                 height: cameraHeight,
                                 child: CameraFeedView(
                                   controller: provider.cameraController,
-                                  isInitialized: provider.isInitialized,
+                                  isInitialized: provider.isInitialized && provider.isModelReady,
                                   isMonitoring: provider.isMonitoring,
                                   hasDriverFace: provider.hasValidDriverFace,
                                   isLowLight: provider.isLowLight,
@@ -389,13 +494,16 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                               // Start / Stop Primary Action Button
                               PrimaryActionButton(
                                 isMonitoring: provider.isMonitoring,
-                                onPressed: () {
-                                  if (provider.isMonitoring) {
-                                    provider.stopMonitoring();
-                                  } else {
-                                    provider.startMonitoring();
-                                  }
-                                },
+                                isEnabled: provider.isModelReady && provider.isInitialized,
+                                onPressed: (provider.isModelReady && provider.isInitialized)
+                                    ? () {
+                                        if (provider.isMonitoring) {
+                                          provider.stopMonitoring();
+                                        } else {
+                                          provider.startMonitoring();
+                                        }
+                                      }
+                                    : null,
                               ),
                               const SizedBox(height: 10),
                             ],

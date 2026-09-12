@@ -3,11 +3,13 @@ import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 
 class PrimaryActionButton extends StatelessWidget {
   final bool isMonitoring;
-  final VoidCallback onPressed;
+  final bool isEnabled;
+  final VoidCallback? onPressed;
 
   const PrimaryActionButton({
     super.key,
     required this.isMonitoring,
+    this.isEnabled = true,
     required this.onPressed,
   });
 
@@ -17,12 +19,15 @@ class PrimaryActionButton extends StatelessWidget {
       width: double.infinity,
       height: 58,
       child: ElevatedButton.icon(
-        onPressed: onPressed,
+        onPressed: isEnabled ? onPressed : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor:
-              isMonitoring ? AppColors.alarmRed : AppColors.normalGreen,
+          backgroundColor: isMonitoring
+              ? AppColors.alarmRed
+              : (isEnabled ? AppColors.normalGreen : Colors.grey.shade800),
           foregroundColor: Colors.white,
-          elevation: 4,
+          disabledBackgroundColor: Colors.grey.shade800,
+          disabledForegroundColor: Colors.grey.shade500,
+          elevation: isEnabled ? 4 : 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
