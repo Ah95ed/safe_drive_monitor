@@ -69,6 +69,13 @@ class MainActivity : FlutterActivity() {
                     openBatteryOptimizationSettings()
                     result.success(true)
                 }
+                "getThermalStatus" -> {
+                    result.success(getDeviceThermalStatus())
+                }
+                "getThermalHeadroom" -> {
+                    val forecastSeconds = call.argument<Int>("forecastSeconds") ?: 0
+                    result.success(getDeviceThermalHeadroom(forecastSeconds))
+                }
                 else -> result.notImplemented()
             }
         }
@@ -115,6 +122,31 @@ class MainActivity : FlutterActivity() {
                 }
                 startActivity(appIntent)
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun getDeviceThermalStatus(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return 0 // THERMAL_STATUS_NONE
+        }
+        return try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            powerManager?.currentThermalStatus ?: 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    private fun getDeviceThermalHeadroom(forecastSeconds: Int): Double {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return -1.0
+        }
+        return try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            val headroom = powerManager?.getThermalHeadroom(forecastSeconds) ?: -1.0f
+            headroom.toDouble()
+        } catch (e: Exception) {
+            -1.0
         }
     }
 }

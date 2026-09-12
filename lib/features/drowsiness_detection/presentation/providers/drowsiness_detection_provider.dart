@@ -27,6 +27,9 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/drowsiness_analyzer.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/low_light_detector.dart';
 
+import 'package:safe_drive_monitor/core/services/thermal_manager_service.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/adaptive_inference_scheduler.dart';
+
 class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _tag = 'DrowsinessProvider';
 
@@ -41,6 +44,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   final HapticService _hapticService;
   final BatteryOptimizationService _batteryOptService;
   final ForegroundMonitoringService _foregroundService;
+  final ThermalManagerService _thermalService;
+  final AdaptiveInferenceScheduler _scheduler;
   late final AlarmController _alarmController;
 
   AppLifecycleState _currentLifecycleState = AppLifecycleState.resumed;
@@ -60,6 +65,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   EyePrediction? _lastPrediction;
   DriverFace? _currentDriverFace;
   DriverAlertState _alertState = DriverAlertState.normal;
+  bool _isSafetyOverrideActive = false;
 
   /// Diagnostics knobs (PHASE 2/4 bring-up), overridable without a rebuild:
   ///   --dart-define=DETECTION_MODE=java   -> start in java-compatible path
@@ -86,10 +92,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   int _droppedFramesCount = 0;
   int _processedFramesCount = 0;
 
-  /// Throttling intervals
+  /// Throttling intervals (dynamically updated by AdaptiveInferenceScheduler)
   Duration _inferenceInterval = AppConstants.defaultInferenceInterval;
-  static const Duration _faceDetectionInterval = Duration(milliseconds: 280); // ~3.5 Hz
-  static const Duration _uiThrottleInterval = Duration(milliseconds: 500); // 2 Hz max for UI tree
+  Duration _faceDetectionInterval = const Duration(milliseconds: 550); // ~1.8 Hz baseline
+  Duration _uiThrottleInterval = const Duration(milliseconds: 500); // 2 Hz max for UI tree
 
   DrowsinessDetectionProvider({
     CameraService? cameraService,
@@ -104,6 +110,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     AlarmController? alarmController,
     BatteryOptimizationService? batteryOptService,
     ForegroundMonitoringService? foregroundService,
+    ThermalManagerService? thermalService,
+    AdaptiveInferenceScheduler? scheduler,
   })  : _cameraService = cameraService ?? AppCameraService(),
         _classifier = classifier ?? TfliteEyeStateClassifier(),
         _faceDetectionService = faceDetectionService ?? MlKitFaceDetectionService(),
@@ -114,7 +122,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         _audioAlarmService = audioAlarmService ?? AppAudioAlarmService(),
         _hapticService = hapticService ?? AppHapticService(),
         _batteryOptService = batteryOptService ?? AppBatteryOptimizationService(),
-        _foregroundService = foregroundService ?? AppForegroundMonitoringService() {
+        _foregroundService = foregroundService ?? AppForegroundMonitoringService(),
+        _thermalService = thermalService ?? AppThermalManagerService(),
+        _scheduler = scheduler ?? AdaptiveInferenceScheduler() {
     _alarmController = alarmController ??
         AlarmController(_audioAlarmService, _hapticService);
     _syncConfigWithClassifier();
@@ -233,6 +243,11 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   int get droppedFramesCount => _droppedFramesCount;
   int get processedFramesCount => _processedFramesCount;
   Duration get inferenceInterval => _inferenceInterval;
+  Duration get faceDetectionInterval => _faceDetectionInterval;
+  double get targetInferenceHz => _scheduler.currentInferenceHz;
+  DeviceThermalState get thermalState => _thermalService.currentState;
+  double? get thermalHeadroom => _thermalService.lastThermalHeadroom;
+  bool get isSafetyOverrideActive => _isSafetyOverrideActive;
   bool get isLegacyAlarmTriggered => _alertState.isAlarm;
 
   @override
@@ -291,15 +306,26 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         AppLogger.warning(_tag, 'Foreground service warning: $e');
       }
 
-      // 2. Reset session trackers
+      // 2. Reset session trackers & scheduler
       _drowsinessAnalyzer.reset();
       _faceTracker.reset();
       _lightingManager.reset();
+      _scheduler.reset();
       _currentDriverFace = null;
       _droppedFramesCount = 0;
       _processedFramesCount = 0;
       _lastInferenceTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
       _lastFaceDetectionTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
+      _isSafetyOverrideActive = false;
+
+      // 3. Start thermal management monitoring (low frequency 15s)
+      _thermalService.startMonitoring(
+        interval: const Duration(seconds: 15),
+        onThermalStateChanged: (thermalState) {
+          AppLogger.info(_tag, 'Thermal state update received: ${thermalState.name}');
+          notifyListeners();
+        },
+      );
 
       _sessionState = DrivingSessionState(
         active: true,
@@ -311,10 +337,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         wakeLockActive: true,
       );
 
-      // 3. Start Camera Image Stream
+      // 4. Start Camera Image Stream
       await _cameraService.startImageStream(_handleCameraFrame);
 
-      // 4. Start Safety Watchdog
+      // 5. Start Safety Watchdog
       _watchdog.start(
         onCameraStallDetected: _recoverCameraStream,
         onHealthChanged: _handleWatchdogHealthChanged,
@@ -327,6 +353,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       if (_disposed) return;
       _isMonitoring = false;
       _watchdog.stop();
+      _thermalService.stopMonitoring();
       _sessionState = DrivingSessionState.idle();
       _error = e;
       _statusMessage = 'فشل في بدء المراقبة';
@@ -344,21 +371,28 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     try {
       _isMonitoring = false;
 
-      // 1. Stop safety watchdog
+      // 1. Stop thermal monitoring
+      try {
+        _thermalService.stopMonitoring();
+      } catch (e) {
+        AppLogger.warning(_tag, 'ThermalService stop error: $e');
+      }
+
+      // 2. Stop safety watchdog
       try {
         _watchdog.stop();
       } catch (e) {
         AppLogger.warning(_tag, 'Watchdog stop error: $e');
       }
 
-      // 2. Stop camera stream
+      // 3. Stop camera stream
       try {
         await _cameraService.stopImageStream();
       } catch (e) {
         AppLogger.warning(_tag, 'Camera stop error: $e');
       }
 
-      // 3. Force stop alarms and haptics unconditionally
+      // 4. Force stop alarms and haptics unconditionally
       try {
         await _alarmController.forceStop();
       } catch (e) {
@@ -375,20 +409,22 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         AppLogger.warning(_tag, 'HapticService stop error: $e');
       }
 
-      // 4. Stop foreground service and remove notification
+      // 5. Stop foreground service and remove notification
       try {
         await _foregroundService.stopForegroundService();
       } catch (e) {
         AppLogger.warning(_tag, 'ForegroundService stop error: $e');
       }
 
-      // 5. Reset analyzers, trackers, lighting
+      // 6. Reset analyzers, trackers, scheduler, lighting
       _drowsinessAnalyzer.reset();
       _faceTracker.reset();
       _lightingManager.reset();
+      _scheduler.reset();
       _currentDriverFace = null;
       _alertState = DriverAlertState.normal;
       _sessionState = DrivingSessionState.idle();
+      _isSafetyOverrideActive = false;
       _statusMessage = 'تم إيقاف المراقبة بنجاح';
 
       AppLogger.info(_tag, 'hardStopAll completed cleanly.');
@@ -485,19 +521,37 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
 
     _watchdog.recordLightingState(isCritical: _lightingManager.isCriticalDarkness);
 
-    // Guard 1: Ignore frame if monitoring is off or inference is already running
+    // 4. Calculate dynamic Adaptive Safety Workload Schedule
+    final schedule = _scheduler.evaluate(
+      alertState: _alertState,
+      lastPrediction: _lastPrediction,
+      driverFace: _currentDriverFace,
+      isFaceTrackingStable: _faceTracker.isTrackingStable,
+      isRoiFresh: _faceTracker.isRoiFresh(now),
+      isLowLight: _lightingManager.isLowLight,
+      thermalState: _thermalService.currentState,
+      now: now,
+      isHeadNodDetected: isHeadNodDetected,
+    );
+
+    _inferenceInterval = schedule.inferenceInterval;
+    _faceDetectionInterval = schedule.faceDetectionInterval;
+    _uiThrottleInterval = schedule.uiThrottleInterval;
+    _isSafetyOverrideActive = schedule.isSafetyOverrideActive;
+
+    // Guard 1: Zero Queue Policy - Drop frame if busy or monitoring stopped
     if (!_isMonitoring || _isProcessingFrame) {
       _droppedFramesCount++;
       return;
     }
 
-    // 4. Asynchronous Face Detection: maintain consistent ~280ms interval for fresh tracking
+    // 5. Adaptive Asynchronous Face Detection: runs at 1-2 Hz when stable, upshifts to 4-5 Hz when lost/unstable
     if (!_isDetectingFace &&
         now.difference(_lastFaceDetectionTimestamp) >= _faceDetectionInterval) {
       _runFaceDetection(image, now);
     }
 
-    // Guard 2: Throttling interval for eye state inference
+    // Guard 2: Adaptive inference interval throttling
     if (now.difference(_lastInferenceTimestamp) < _inferenceInterval) {
       _droppedFramesCount++;
       return;
@@ -614,17 +668,6 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
           analysisResult: analysisResult,
           alarmPlaying: _alarmController.isPlaying,
         );
-      }
-
-      // 6. Adaptive Inference Interval Throttling (3-5 Hz when open, 12-15 Hz when drowsy)
-      if (config.enableAdaptiveInference) {
-        if (_alertState == DriverAlertState.normal) {
-          _inferenceInterval = config.normalInferenceInterval; // 220ms (~4.5 Hz)
-        } else if (_alertState == DriverAlertState.watching) {
-          _inferenceInterval = const Duration(milliseconds: 125); // 8 Hz
-        } else {
-          _inferenceInterval = config.alertInferenceInterval; // 90ms (~11 Hz)
-        }
       }
 
       _statusMessage = analysisResult.statusMessage;

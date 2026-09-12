@@ -267,6 +267,40 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                   ),
                                 ),
 
+                              // Thermal Pressure Status Banner
+                              if (provider.thermalState.isThermalPressure)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.watchingAmber.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: AppColors.watchingAmber.withValues(alpha: 0.5),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.thermostat_rounded,
+                                        color: AppColors.watchingAmber,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'حماية حرارية: تم تخفيض الحمل غير الأساسي لتبريد الجهاز (${provider.thermalState.arabicLabel})',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.textPrimary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
                               // Alert Banner Overlay for Drowsiness
                               AlertBannerOverlay(
                                 alertState: provider.alertState,

@@ -13,6 +13,7 @@ class DriverFaceTracker {
   Rect? _smoothedEyeRoi;
   Rect? _smoothedFaceBox;
   DateTime? _lastDetectedTimestamp;
+  int _consecutiveStableDetections = 0;
 
   DriverFaceTracker({
     // Keep the tracked ROI usable during background audio/inference load.
@@ -25,6 +26,8 @@ class DriverFaceTracker {
   DriverFace? get lastValidFace => _lastValidFace;
   Rect? get currentEyeRoi => _smoothedEyeRoi;
   Rect? get currentFaceBox => _smoothedFaceBox;
+  int get consecutiveStableDetections => _consecutiveStableDetections;
+  bool get isTrackingStable => _consecutiveStableDetections >= 2 && _activeTrackingId != null;
 
   /// Check if the driver face is currently active and within freshness timeout
   bool isDriverFaceActive(DateTime now) {
@@ -34,6 +37,12 @@ class DriverFaceTracker {
     return now.difference(_lastDetectedTimestamp!) <= faceLossTimeout;
   }
 
+  /// Check if the cached ROI is fresh enough for low-frequency ML Kit cycles
+  bool isRoiFresh(DateTime now, {Duration maxFreshDuration = const Duration(milliseconds: 900)}) {
+    if (_lastDetectedTimestamp == null || _smoothedEyeRoi == null) return false;
+    return now.difference(_lastDetectedTimestamp!) <= maxFreshDuration;
+  }
+
   /// Resets the tracker (e.g. at session start/stop).
   void reset() {
     _activeTrackingId = null;
@@ -41,6 +50,7 @@ class DriverFaceTracker {
     _smoothedEyeRoi = null;
     _smoothedFaceBox = null;
     _lastDetectedTimestamp = null;
+    _consecutiveStableDetections = 0;
   }
 
   /// Updates tracking with a list of detected candidate faces from the camera frame.
@@ -50,6 +60,7 @@ class DriverFaceTracker {
     RoiStrategy roiStrategy = RoiStrategy.eyeBand,
   }) {
     if (detectedFaces.isEmpty) {
+      _consecutiveStableDetections = 0;
       if (!isDriverFaceActive(timestamp)) {
         _smoothedEyeRoi = null;
         _smoothedFaceBox = null;
@@ -67,10 +78,16 @@ class DriverFaceTracker {
         (f) => f.trackingId == _activeTrackingId,
         orElse: () => _findBestSpatialMatch(detectedFaces, _smoothedFaceBox),
       );
+      if (match.trackingId == _activeTrackingId) {
+        _consecutiveStableDetections++;
+      } else {
+        _consecutiveStableDetections = 1;
+      }
       selectedFace = match;
     } else {
       // First acquisition: select the dominant (largest / most centered) face
       selectedFace = _selectDominantFace(detectedFaces);
+      _consecutiveStableDetections = 1;
     }
 
     _activeTrackingId = selectedFace.trackingId;

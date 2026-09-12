@@ -150,6 +150,8 @@ class MlKitFaceDetectionService implements FaceDetectionService {
     _facesSinceDiag = 0;
   }
 
+  Uint8List? _nv21Buffer;
+
   InputImage? _convertCameraImageToInputImage(
     CameraImage image,
     int sensorRotation,
@@ -169,7 +171,8 @@ class MlKitFaceDetectionService implements FaceDetectionService {
       );
     } else {
       // Android YUV420 / NV21: Convert 3-plane YUV to standard NV21 for ML Kit
-      final Uint8List nv21Bytes = _convertYuv420ToNv21(image);
+      // Use reusable instance buffer to eliminate per-frame heap allocations
+      final Uint8List nv21Bytes = _getYuv420Nv21Bytes(image);
 
       return InputImage.fromBytes(
         bytes: nv21Bytes,
@@ -183,8 +186,25 @@ class MlKitFaceDetectionService implements FaceDetectionService {
     }
   }
 
-  /// Converts Android 3-plane YUV_420_888 to standard single-buffer NV21 format.
-  static Uint8List _convertYuv420ToNv21(CameraImage image) {
+  Uint8List _getYuv420Nv21Bytes(CameraImage image) {
+    // If single plane is already NV21
+    if (image.planes.length == 1) {
+      return image.planes[0].bytes;
+    }
+
+    final int width = image.width;
+    final int height = image.height;
+    final int requiredSize = width * height + (width * (height ~/ 2));
+
+    if (_nv21Buffer == null || _nv21Buffer!.length != requiredSize) {
+      _nv21Buffer = Uint8List(requiredSize);
+    }
+
+    return _convertYuv420ToNv21(image, _nv21Buffer!);
+  }
+
+  /// Converts Android 3-plane YUV_420_888 to standard single-buffer NV21 format into targetBuffer.
+  static Uint8List _convertYuv420ToNv21(CameraImage image, [Uint8List? targetBuffer]) {
     final int width = image.width;
     final int height = image.height;
 
@@ -195,7 +215,7 @@ class MlKitFaceDetectionService implements FaceDetectionService {
 
     final int ySize = width * height;
     final int uvSize = width * (height ~/ 2);
-    final Uint8List nv21 = Uint8List(ySize + uvSize);
+    final Uint8List nv21 = targetBuffer ?? Uint8List(ySize + uvSize);
 
     final Plane yPlane = image.planes[0];
     final Plane uPlane = image.planes[1];
