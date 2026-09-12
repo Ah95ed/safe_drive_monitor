@@ -85,6 +85,20 @@ class DrowsinessAnalyzer {
     _perclosCalculator.reset();
   }
 
+  /// Resets transient drowsiness accumulation (e.g. at lifecycle transition boundaries)
+  /// without discarding long-term session data or canceling a confirmed, active ALARM.
+  void resetTransientEvidence() {
+    _closedStartedAt = null;
+    _openStartedAt = null;
+    _recoveryWindow.clear();
+    _emaOpenConfidence = 0.0;
+    // If not in confirmed alarm, reset alert state back to normal
+    if (_currentState != DriverAlertState.alarm) {
+      _currentState = DriverAlertState.normal;
+      _isAlarmPlaying = false;
+    }
+  }
+
   /// Processes an [EyePrediction] with optional [DriverFace] pose and custom timestamp [now].
   DrowsinessAnalysisResult processPrediction(
     EyePrediction prediction, {

@@ -14,6 +14,7 @@ class DriverFace {
   final double? leftEyeOpenProbability;
   final double? rightEyeOpenProbability;
   final DateTime detectedAt;
+  final int lifecycleEpoch;
 
   const DriverFace({
     this.trackingId,
@@ -27,6 +28,7 @@ class DriverFace {
     this.leftEyeOpenProbability,
     this.rightEyeOpenProbability,
     required this.detectedAt,
+    this.lifecycleEpoch = 0,
   });
 
   /// Check if the detected face has valid eye landmarks
@@ -38,5 +40,35 @@ class DriverFace {
       return (leftEyeOpenProbability! + rightEyeOpenProbability!) / 2.0;
     }
     return leftEyeOpenProbability ?? rightEyeOpenProbability;
+  }
+
+  DriverFace copyWith({
+    int? trackingId,
+    Rect? boundingBox,
+    Rect? eyeRoi,
+    Point<int>? leftEye,
+    Point<int>? rightEye,
+    double? headEulerAngleX,
+    double? headEulerAngleY,
+    double? headEulerAngleZ,
+    double? leftEyeOpenProbability,
+    double? rightEyeOpenProbability,
+    DateTime? detectedAt,
+    int? lifecycleEpoch,
+  }) {
+    return DriverFace(
+      trackingId: trackingId ?? this.trackingId,
+      boundingBox: boundingBox ?? this.boundingBox,
+      eyeRoi: eyeRoi ?? this.eyeRoi,
+      leftEye: leftEye ?? this.leftEye,
+      rightEye: rightEye ?? this.rightEye,
+      headEulerAngleX: headEulerAngleX ?? this.headEulerAngleX,
+      headEulerAngleY: headEulerAngleY ?? this.headEulerAngleY,
+      headEulerAngleZ: headEulerAngleZ ?? this.headEulerAngleZ,
+      leftEyeOpenProbability: leftEyeOpenProbability ?? this.leftEyeOpenProbability,
+      rightEyeOpenProbability: rightEyeOpenProbability ?? this.rightEyeOpenProbability,
+      detectedAt: detectedAt ?? this.detectedAt,
+      lifecycleEpoch: lifecycleEpoch ?? this.lifecycleEpoch,
+    );
   }
 }

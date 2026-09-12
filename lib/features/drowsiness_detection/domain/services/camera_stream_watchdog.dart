@@ -9,12 +9,14 @@ class WatchdogConfig {
   final Duration inferenceStallTimeout;
   final Duration faceLostTimeout;
   final Duration checkInterval;
+  final Duration transitionGrace;
 
   const WatchdogConfig({
     this.cameraStallTimeout = AppConstants.cameraStallTimeout,
     this.inferenceStallTimeout = AppConstants.inferenceStallTimeout,
     this.faceLostTimeout = AppConstants.faceLostDegradedTimeout,
     this.checkInterval = const Duration(milliseconds: 1000),
+    this.transitionGrace = const Duration(milliseconds: 1200),
   });
 }
 
@@ -33,6 +35,7 @@ class MonitoringWatchdog {
   DateTime? _lastInferenceAt;
   DateTime? _lastFaceDetectedAt;
   DateTime? _lastServiceHeartbeatAt;
+  DateTime? _lastTransitionAt;
   bool _isLightCriticallyLow = false;
   bool _isThermalThrottled = false;
 
@@ -49,6 +52,7 @@ class MonitoringWatchdog {
   DateTime? get lastInferenceAt => _lastInferenceAt;
   DateTime? get lastFaceDetectedAt => _lastFaceDetectedAt;
   DateTime? get lastServiceHeartbeatAt => _lastServiceHeartbeatAt;
+  DateTime? get lastTransitionAt => _lastTransitionAt;
   MonitoringHealth get currentHealth => _currentHealth;
   MonitoringIssue get currentIssue => _currentIssue;
 
@@ -77,6 +81,12 @@ class MonitoringWatchdog {
     _lastServiceHeartbeatAt = timestamp ?? DateTime.now();
   }
 
+  /// Records an app lifecycle transition (e.g. moving to background) to grant a temporary transition grace.
+  void recordLifecycleTransition([DateTime? timestamp]) {
+    _lastTransitionAt = timestamp ?? DateTime.now();
+    AppLogger.info(_tag, 'Watchdog transition grace activated (1200ms).');
+  }
+
   /// Sets critical ambient light state.
   void recordLightingState({required bool isCritical}) {
     _isLightCriticallyLow = isCritical;
@@ -93,10 +103,19 @@ class MonitoringWatchdog {
       return (health: MonitoringHealth.healthy, issue: MonitoringIssue.none);
     }
 
+    final bool isWithinGrace = _lastTransitionAt != null &&
+        now.difference(_lastTransitionAt!) < config.transitionGrace + config.cameraStallTimeout;
+    final cameraTimeout = isWithinGrace
+        ? config.cameraStallTimeout + config.transitionGrace
+        : config.cameraStallTimeout;
+    final inferenceTimeout = isWithinGrace
+        ? config.inferenceStallTimeout + config.transitionGrace
+        : config.inferenceStallTimeout;
+
     // 1. Check Camera Stall (Hardware / Stream freeze)
     if (_lastCameraFrameAt != null) {
       final frameAge = now.difference(_lastCameraFrameAt!);
-      if (frameAge > config.cameraStallTimeout) {
+      if (frameAge > cameraTimeout) {
         return (health: MonitoringHealth.failed, issue: MonitoringIssue.cameraStalled);
       }
     }
@@ -104,7 +123,7 @@ class MonitoringWatchdog {
     // 2. Check Inference Stall (Frames are arriving but AI pipeline is blocked)
     if (_lastCameraFrameAt != null && _lastInferenceAt != null) {
       final inferenceAge = now.difference(_lastInferenceAt!);
-      if (inferenceAge > config.inferenceStallTimeout) {
+      if (inferenceAge > inferenceTimeout) {
         return (health: MonitoringHealth.failed, issue: MonitoringIssue.inferenceStalled);
       }
     }

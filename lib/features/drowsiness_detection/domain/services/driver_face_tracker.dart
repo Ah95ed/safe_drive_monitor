@@ -14,6 +14,7 @@ class DriverFaceTracker {
   Rect? _smoothedFaceBox;
   DateTime? _lastDetectedTimestamp;
   int _consecutiveStableDetections = 0;
+  int _currentEpoch = 0;
 
   DriverFaceTracker({
     // Keep the tracked ROI usable during background audio/inference load.
@@ -27,30 +28,42 @@ class DriverFaceTracker {
   Rect? get currentEyeRoi => _smoothedEyeRoi;
   Rect? get currentFaceBox => _smoothedFaceBox;
   int get consecutiveStableDetections => _consecutiveStableDetections;
+  int get currentEpoch => _currentEpoch;
   bool get isTrackingStable => _consecutiveStableDetections >= 2 && _activeTrackingId != null;
 
-  /// Check if the driver face is currently active and within freshness timeout
-  bool isDriverFaceActive(DateTime now) {
+  /// Check if the driver face is currently active, within freshness timeout, and matches active epoch.
+  bool isDriverFaceActive(DateTime now, {int? epoch}) {
     if (_lastDetectedTimestamp == null || _smoothedEyeRoi == null) {
+      return false;
+    }
+    if (epoch != null && _lastValidFace?.lifecycleEpoch != epoch) {
       return false;
     }
     return now.difference(_lastDetectedTimestamp!) <= faceLossTimeout;
   }
 
-  /// Check if the cached ROI is fresh enough for low-frequency ML Kit cycles
-  bool isRoiFresh(DateTime now, {Duration maxFreshDuration = const Duration(milliseconds: 900)}) {
+  /// Check if the cached ROI is fresh enough for low-frequency ML Kit cycles and matches active epoch.
+  bool isRoiFresh(
+    DateTime now, {
+    Duration maxFreshDuration = const Duration(milliseconds: 900),
+    int? epoch,
+  }) {
     if (_lastDetectedTimestamp == null || _smoothedEyeRoi == null) return false;
+    if (epoch != null && _lastValidFace?.lifecycleEpoch != epoch) return false;
     return now.difference(_lastDetectedTimestamp!) <= maxFreshDuration;
   }
 
-  /// Resets the tracker (e.g. at session start/stop).
-  void reset() {
+  /// Resets the tracker (e.g. at session start/stop or lifecycle epoch boundary).
+  void reset([int? epoch]) {
     _activeTrackingId = null;
     _lastValidFace = null;
     _smoothedEyeRoi = null;
     _smoothedFaceBox = null;
     _lastDetectedTimestamp = null;
     _consecutiveStableDetections = 0;
+    if (epoch != null) {
+      _currentEpoch = epoch;
+    }
   }
 
   /// Updates tracking with a list of detected candidate faces from the camera frame.
@@ -58,15 +71,27 @@ class DriverFaceTracker {
     List<DriverFace> detectedFaces, {
     required DateTime timestamp,
     RoiStrategy roiStrategy = RoiStrategy.eyeBand,
+    int lifecycleEpoch = 0,
   }) {
+    // If epoch changed across lifecycle boundary, invalidate previous epoch state immediately
+    if (lifecycleEpoch != _currentEpoch) {
+      _currentEpoch = lifecycleEpoch;
+      _activeTrackingId = null;
+      _lastValidFace = null;
+      _smoothedEyeRoi = null;
+      _smoothedFaceBox = null;
+      _lastDetectedTimestamp = null;
+      _consecutiveStableDetections = 0;
+    }
+
     if (detectedFaces.isEmpty) {
       _consecutiveStableDetections = 0;
-      if (!isDriverFaceActive(timestamp)) {
+      if (!isDriverFaceActive(timestamp, epoch: lifecycleEpoch)) {
         _smoothedEyeRoi = null;
         _smoothedFaceBox = null;
         _activeTrackingId = null;
       }
-      return isDriverFaceActive(timestamp) ? _lastValidFace : null;
+      return isDriverFaceActive(timestamp, epoch: lifecycleEpoch) ? _lastValidFace : null;
     }
 
     // 1. Select the driver face from candidates
@@ -112,6 +137,7 @@ class DriverFaceTracker {
       leftEyeOpenProbability: selectedFace.leftEyeOpenProbability,
       rightEyeOpenProbability: selectedFace.rightEyeOpenProbability,
       detectedAt: timestamp,
+      lifecycleEpoch: lifecycleEpoch,
     );
 
     return _lastValidFace;

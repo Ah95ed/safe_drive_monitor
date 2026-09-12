@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/widgets.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
@@ -30,7 +31,8 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services
 import 'package:safe_drive_monitor/core/services/thermal_manager_service.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/adaptive_inference_scheduler.dart';
 
-class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObserver {
+class DrowsinessDetectionProvider extends ChangeNotifier
+    with WidgetsBindingObserver {
   static const String _tag = 'DrowsinessProvider';
 
   final CameraService _cameraService;
@@ -67,11 +69,18 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   DriverAlertState _alertState = DriverAlertState.normal;
   bool _isSafetyOverrideActive = false;
 
+  // Background Transition Gate & Epoch Tracking (Fix False Alarm on Background Transition)
+  DateTime? _lastLifecycleTransitionAt;
+  int _lifecycleEpoch = 0;
+  bool _backgroundDetectionArmed = true;
+  int _freshPredictionsAfterTransition = 0;
+
   /// Diagnostics knobs (PHASE 2/4 bring-up), overridable without a rebuild:
   ///   --dart-define=DETECTION_MODE=java   -> start in java-compatible path
   ///   --dart-define=ROT_OFFSET=90         -> add degrees to the sensor rotation
-  static const String _detectionModeOverride =
-      String.fromEnvironment('DETECTION_MODE');
+  static const String _detectionModeOverride = String.fromEnvironment(
+    'DETECTION_MODE',
+  );
   static const int _rotationOffset = int.fromEnvironment('ROT_OFFSET');
 
   DetectionMode _detectionMode = _detectionModeOverride == 'java'
@@ -87,15 +96,21 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   DateTime _lastFrameProcessedTimestamp = DateTime.now();
   DateTime _lastInferenceTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastFaceDetectionTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
-  DateTime _lastUiNotificationTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastUiNotificationTimestamp = DateTime.fromMillisecondsSinceEpoch(
+    0,
+  );
   double _processedFps = 0.0;
   int _droppedFramesCount = 0;
   int _processedFramesCount = 0;
 
   /// Throttling intervals (dynamically updated by AdaptiveInferenceScheduler)
   Duration _inferenceInterval = AppConstants.defaultInferenceInterval;
-  Duration _faceDetectionInterval = const Duration(milliseconds: 550); // ~1.8 Hz baseline
-  Duration _uiThrottleInterval = const Duration(milliseconds: 500); // 2 Hz max for UI tree
+  Duration _faceDetectionInterval = const Duration(
+    milliseconds: 550,
+  ); // ~1.8 Hz baseline
+  Duration _uiThrottleInterval = const Duration(
+    milliseconds: 500,
+  ); // 2 Hz max for UI tree
 
   DrowsinessDetectionProvider({
     CameraService? cameraService,
@@ -112,27 +127,132 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     ForegroundMonitoringService? foregroundService,
     ThermalManagerService? thermalService,
     AdaptiveInferenceScheduler? scheduler,
-  })  : _cameraService = cameraService ?? AppCameraService(),
-        _classifier = classifier ?? TfliteEyeStateClassifier(),
-        _faceDetectionService = faceDetectionService ?? MlKitFaceDetectionService(),
-        _faceTracker = faceTracker ?? DriverFaceTracker(),
-        _watchdog = watchdog ?? MonitoringWatchdog(),
-        _lightingManager = lowLightDetector ?? LightingManager(),
-        _drowsinessAnalyzer = drowsinessAnalyzer ?? DrowsinessAnalyzer(),
-        _audioAlarmService = audioAlarmService ?? AppAudioAlarmService(),
-        _hapticService = hapticService ?? AppHapticService(),
-        _batteryOptService = batteryOptService ?? AppBatteryOptimizationService(),
-        _foregroundService = foregroundService ?? AppForegroundMonitoringService(),
-        _thermalService = thermalService ?? AppThermalManagerService(),
-        _scheduler = scheduler ?? AdaptiveInferenceScheduler() {
-    _alarmController = alarmController ??
-        AlarmController(_audioAlarmService, _hapticService);
+  }) : _cameraService = cameraService ?? AppCameraService(),
+       _classifier = classifier ?? TfliteEyeStateClassifier(),
+       _faceDetectionService =
+           faceDetectionService ?? MlKitFaceDetectionService(),
+       _faceTracker = faceTracker ?? DriverFaceTracker(),
+       _watchdog = watchdog ?? MonitoringWatchdog(),
+       _lightingManager = lowLightDetector ?? LightingManager(),
+       _drowsinessAnalyzer = drowsinessAnalyzer ?? DrowsinessAnalyzer(),
+       _audioAlarmService = audioAlarmService ?? AppAudioAlarmService(),
+       _hapticService = hapticService ?? AppHapticService(),
+       _batteryOptService =
+           batteryOptService ?? AppBatteryOptimizationService(),
+       _foregroundService =
+           foregroundService ?? AppForegroundMonitoringService(),
+       _thermalService = thermalService ?? AppThermalManagerService(),
+       _scheduler = scheduler ?? AdaptiveInferenceScheduler() {
+    _alarmController =
+        alarmController ?? AlarmController(_audioAlarmService, _hapticService);
     _syncConfigWithClassifier();
     _foregroundService.setNotificationStopHandler(() async {
-      AppLogger.info(_tag, 'Notification Stop event received. Executing hardStopAll().');
+      AppLogger.info(
+        _tag,
+        'Notification Stop event received. Executing hardStopAll().',
+      );
       await hardStopAll();
     });
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_disposed) return;
+    final previousState = _currentLifecycleState;
+    _currentLifecycleState = state;
+
+    AppLogger.info(
+      'LIFECYCLE_TRANSITION',
+      'from=${previousState.name} to=${state.name} epoch=$_lifecycleEpoch',
+    );
+
+    final bool isMovingToBackground =
+        (previousState == AppLifecycleState.resumed) &&
+        (state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.paused ||
+            state == AppLifecycleState.hidden);
+
+    if (isMovingToBackground && _isMonitoring) {
+      final now = DateTime.now();
+      _lastLifecycleTransitionAt = now;
+      _lifecycleEpoch++;
+      _freshPredictionsAfterTransition = 0;
+
+      AppLogger.info(
+        'BACKGROUND_GATE',
+        'transition to ${state.name}, epoch=$_lifecycleEpoch, alertState=${_alertState.name}',
+      );
+
+      // Phase 3 & 4: Invalidate stale Face/ROI and transient drowsiness evidence from foreground
+      // PRESERVE confirmed real alarm if one was already active before transition (Phase 12)
+      if (_alertState != DriverAlertState.alarm) {
+        _backgroundDetectionArmed = false;
+        _faceTracker.reset(_lifecycleEpoch);
+        _currentDriverFace = null;
+        _drowsinessAnalyzer.resetTransientEvidence();
+        AppLogger.info(
+          'DROWSINESS_TIMER',
+          'closedStartedAt=null (transient evidence reset on background transition)',
+        );
+      } else {
+        // Confirmed real alarm is active! Preserve it.
+        if (_currentDriverFace != null) {
+          _currentDriverFace = _currentDriverFace!.copyWith(
+            lifecycleEpoch: _lifecycleEpoch,
+          );
+        }
+        _backgroundDetectionArmed = true; // Alarm already confirmed
+        AppLogger.info(
+          'DROWSINESS_ALARM',
+          'Preserving confirmed alarm across background transition',
+        );
+      }
+
+      // Phase 11: Watchdog transition grace
+      _watchdog.recordLifecycleTransition(now);
+      notifyListeners();
+    }
+
+    final bool isMovingToForeground =
+        (previousState == AppLifecycleState.inactive ||
+            previousState == AppLifecycleState.paused ||
+            previousState == AppLifecycleState.hidden) &&
+        (state == AppLifecycleState.resumed);
+
+    if (isMovingToForeground && _isMonitoring) {
+      final now = DateTime.now();
+      _lastLifecycleTransitionAt = now;
+      _lifecycleEpoch++;
+      _backgroundDetectionArmed = true;
+      _freshPredictionsAfterTransition = 0;
+
+      if (_alertState != DriverAlertState.alarm) {
+        _faceTracker.reset(_lifecycleEpoch);
+        _currentDriverFace = null;
+        _drowsinessAnalyzer.resetTransientEvidence();
+      }
+
+      _watchdog.recordLifecycleTransition(now);
+      AppLogger.info(
+        _tag,
+        'UI resumed. Syncing UI with active driving session.',
+      );
+      notifyListeners();
+    }
+
+    if (state == AppLifecycleState.detached) {
+      // Decouple UI lifecycle from driving session lifecycle:
+      // Do NOT automatically destroy monitoring runtime if driving session is active!
+      if (!_isMonitoring) {
+        disposeResources();
+      } else {
+        AppLogger.warning(
+          _tag,
+          'UI detached while driving session is ACTIVE. Monitoring runtime preserved in foreground.',
+        );
+      }
+    }
   }
 
   /// Delegates to native Android to move the app task to background without killing the session.
@@ -141,8 +261,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   }
 
   void _syncConfigWithClassifier() {
-    _classifier.minOpenConfidence = _drowsinessAnalyzer.config.minimumOpenConfidence;
-    _classifier.minClosedConfidence = _drowsinessAnalyzer.config.minimumClosedConfidence;
+    _classifier.minOpenConfidence =
+        _drowsinessAnalyzer.config.minimumOpenConfidence;
+    _classifier.minClosedConfidence =
+        _drowsinessAnalyzer.config.minimumClosedConfidence;
   }
 
   void _applyDetectionModeConfig() {
@@ -175,7 +297,12 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   EyePrediction? get lastPrediction => _lastPrediction;
   DriverFace? get currentDriverFace => _currentDriverFace;
   bool get hasValidDriverFace =>
-      _faceTracker.isDriverFaceActive(DateTime.now());
+      _faceTracker.isDriverFaceActive(DateTime.now(), epoch: _lifecycleEpoch);
+  int get lifecycleEpoch => _lifecycleEpoch;
+  DateTime? get lastLifecycleTransitionAt => _lastLifecycleTransitionAt;
+  bool get isBackgroundDetectionArmed => _backgroundDetectionArmed;
+  int get freshPredictionsAfterTransition => _freshPredictionsAfterTransition;
+
   DriverAlertState get alertState => _alertState;
   String get statusMessage => _statusMessage;
   Object? get error => _error;
@@ -194,7 +321,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   double get currentLuminance => _lightingManager.currentLuminance;
   bool get isLowLight => _lightingManager.isLowLight;
   bool get isCriticalDarkness => _lightingManager.isCriticalDarkness;
-  double get screenIlluminationOpacity => _lightingManager.screenIlluminationOpacity;
+  double get screenIlluminationOpacity =>
+      _lightingManager.screenIlluminationOpacity;
 
   void togglePowerSaverMode() {
     _isPowerSaverMode = !_isPowerSaverMode;
@@ -210,7 +338,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   }
 
   Future<bool> requestIgnoreBatteryOptimizations() async {
-    final granted = await _batteryOptService.requestIgnoreBatteryOptimizations();
+    final granted = await _batteryOptService
+        .requestIgnoreBatteryOptimizations();
     _isIgnoringBatteryOptimizations = granted;
     _sessionState = _sessionState.copyWith(batteryOptimizationExempt: granted);
     notifyListeners();
@@ -232,6 +361,11 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   double get perclosPercentage => _drowsinessAnalyzer.currentPerclosPercentage;
   bool get isHeadNodDetected =>
       _currentDriverFace?.headEulerAngleX != null &&
+      _currentDriverFace!.lifecycleEpoch == _lifecycleEpoch &&
+      (_lastLifecycleTransitionAt == null ||
+          _currentDriverFace!.detectedAt.isAfter(
+            _lastLifecycleTransitionAt!,
+          )) &&
       _currentDriverFace!.headEulerAngleX! < config.headNodPitchThreshold;
   int get watchdogRecoveryCount => _watchdog.stallRecoveryCount;
 
@@ -307,6 +441,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       }
 
       // 2. Reset session trackers & scheduler
+      _lifecycleEpoch = 0;
+      _lastLifecycleTransitionAt = null;
+      _backgroundDetectionArmed = true;
+      _freshPredictionsAfterTransition = 0;
       _drowsinessAnalyzer.reset();
       _faceTracker.reset();
       _lightingManager.reset();
@@ -322,7 +460,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _thermalService.startMonitoring(
         interval: const Duration(seconds: 15),
         onThermalStateChanged: (thermalState) {
-          AppLogger.info(_tag, 'Thermal state update received: ${thermalState.name}');
+          AppLogger.info(
+            _tag,
+            'Thermal state update received: ${thermalState.name}',
+          );
           notifyListeners();
         },
       );
@@ -417,6 +558,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       }
 
       // 6. Reset analyzers, trackers, scheduler, lighting
+      _lifecycleEpoch = 0;
+      _lastLifecycleTransitionAt = null;
+      _backgroundDetectionArmed = true;
+      _freshPredictionsAfterTransition = 0;
       _drowsinessAnalyzer.reset();
       _faceTracker.reset();
       _lightingManager.reset();
@@ -442,30 +587,36 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
   }
 
   /// Handles health shifts from the watchdog.
-  void _handleWatchdogHealthChanged(MonitoringHealth health, MonitoringIssue issue) {
+  void _handleWatchdogHealthChanged(
+    MonitoringHealth health,
+    MonitoringIssue issue,
+  ) {
     if (_disposed || !_isMonitoring) return;
 
-    _sessionState = _sessionState.copyWith(
-      health: health,
-      issue: issue,
-    );
+    _sessionState = _sessionState.copyWith(health: health, issue: issue);
 
     if (health == MonitoringHealth.failed) {
       _statusMessage = 'تنبيه عطل فني: ${issue.arabicDescription}';
       _audioAlarmService.playTechnicalWarning();
       _hapticService.playWarningHaptic();
-      _foregroundService.updateNotificationStatus('⚠️ توقف نظام المراقبة: ${issue.arabicDescription}');
+      _foregroundService.updateNotificationStatus(
+        '⚠️ توقف نظام المراقبة: ${issue.arabicDescription}',
+      );
     } else if (health == MonitoringHealth.degraded) {
       _statusMessage = 'انخفاض كفاءة: ${issue.arabicDescription}';
       if (issue == MonitoringIssue.insufficientLight) {
         _hapticService.playWarningHaptic();
       }
-      _foregroundService.updateNotificationStatus('انخفاض كفاءة: ${issue.arabicDescription}');
+      _foregroundService.updateNotificationStatus(
+        'انخفاض كفاءة: ${issue.arabicDescription}',
+      );
     } else {
       _statusMessage = _alertState == DriverAlertState.normal
           ? 'المراقبة نشطة ومستقرة'
           : _statusMessage;
-      _foregroundService.updateNotificationStatus('مراقبة يقظة السائق نشطة ومستمرة لحمايتك');
+      _foregroundService.updateNotificationStatus(
+        'مراقبة يقظة السائق نشطة ومستمرة لحمايتك',
+      );
     }
 
     notifyListeners();
@@ -482,11 +633,17 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       await _cameraService.startImageStream(_handleCameraFrame);
       AppLogger.info(_tag, 'Watchdog stream recovery successful.');
     } catch (e) {
-      AppLogger.error(_tag, 'Soft recovery failed, re-initializing camera...', e);
+      AppLogger.error(
+        _tag,
+        'Soft recovery failed, re-initializing camera...',
+        e,
+      );
       try {
         await _cameraService.dispose();
         await Future.delayed(const Duration(milliseconds: 150));
-        await _cameraService.initialize(lensDirection: CameraLensDirection.front);
+        await _cameraService.initialize(
+          lensDirection: CameraLensDirection.front,
+        );
         await _cameraService.startImageStream(_handleCameraFrame);
         AppLogger.info(_tag, 'Full camera re-init recovery successful.');
       } catch (err, st) {
@@ -519,7 +676,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _cameraService.setExposureOffset(suggestedOffset);
     }
 
-    _watchdog.recordLightingState(isCritical: _lightingManager.isCriticalDarkness);
+    _watchdog.recordLightingState(
+      isCritical: _lightingManager.isCriticalDarkness,
+    );
 
     // 4. Calculate dynamic Adaptive Safety Workload Schedule
     final schedule = _scheduler.evaluate(
@@ -562,7 +721,21 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
 
     try {
       final totalStopwatch = Stopwatch()..start();
-      final isFaceActive = _faceTracker.isDriverFaceActive(now) && _currentDriverFace != null;
+      final bool isFaceActive;
+      if (_alertState == DriverAlertState.alarm) {
+        // Preserving confirmed active alarm across transition
+        isFaceActive =
+            _currentDriverFace != null && _faceTracker.isDriverFaceActive(now);
+      } else {
+        isFaceActive =
+            _currentDriverFace != null &&
+            _faceTracker.isDriverFaceActive(now, epoch: _lifecycleEpoch) &&
+            _currentDriverFace!.lifecycleEpoch == _lifecycleEpoch &&
+            (_lastLifecycleTransitionAt == null ||
+                _currentDriverFace!.detectedAt.isAfter(
+                  _lastLifecycleTransitionAt!,
+                ));
+      }
 
       // 1. Mandatory Face Presence Check:
       // If no face is detected, we do NOT run eye inference on background objects (empty room, desk, steering wheel).
@@ -612,8 +785,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       // 3. Multi-modal Sensor Fusion:
       // Combine TFLite eye crop prediction with ML Kit Face Detector's native eye open probability.
       EyePrediction prediction = rawPrediction;
-      final bool isMlKitFresh = _currentDriverFace != null &&
-          now.difference(_currentDriverFace!.detectedAt) <= const Duration(milliseconds: 700);
+      final bool isMlKitFresh =
+          _currentDriverFace != null &&
+          now.difference(_currentDriverFace!.detectedAt) <=
+              const Duration(milliseconds: 700);
       final double? mlKitOpenProb = isMlKitFresh
           ? _currentDriverFace!.averageEyeOpenProbability
           : null;
@@ -621,7 +796,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       if (mlKitOpenProb != null) {
         if (mlKitOpenProb >= 0.60) {
           // ML Kit strongly indicates eyes are OPEN: guarantee OPEN state and high confidence
-          if (rawPrediction.state != EyeState.open || rawPrediction.confidence < mlKitOpenProb) {
+          if (rawPrediction.state != EyeState.open ||
+              rawPrediction.confidence < mlKitOpenProb) {
             prediction = EyePrediction(
               state: EyeState.open,
               openScore: mlKitOpenProb,
@@ -631,9 +807,13 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
               timestamp: rawPrediction.timestamp,
             );
           }
-        } else if (mlKitOpenProb <= 0.20 && rawPrediction.state == EyeState.closed) {
+        } else if (mlKitOpenProb <= 0.20 &&
+            rawPrediction.state == EyeState.closed) {
           // Both confirm CLOSED with high confidence
-          final double closedConf = max(rawPrediction.confidence, 1.0 - mlKitOpenProb);
+          final double closedConf = max(
+            rawPrediction.confidence,
+            1.0 - mlKitOpenProb,
+          );
           prediction = EyePrediction(
             state: EyeState.closed,
             openScore: mlKitOpenProb,
@@ -651,6 +831,27 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _watchdog.recordInferenceHeartbeat(now);
       _sessionState = _sessionState.copyWith(lastInferenceAt: now);
 
+      // Transition Gate: count fresh predictions after transition and evaluate arming
+      if (!_backgroundDetectionArmed) {
+        _freshPredictionsAfterTransition++;
+        final isFaceTrackingStable =
+            _faceTracker.consecutiveStableDetections >= 2;
+        final hasEnoughPredictions = _freshPredictionsAfterTransition >= 2;
+
+        if (isFaceTrackingStable && hasEnoughPredictions) {
+          _backgroundDetectionArmed = true;
+          AppLogger.info(
+            'BACKGROUND_GATE',
+            'armed=true (faceStable=${_faceTracker.consecutiveStableDetections}, predictions=$_freshPredictionsAfterTransition, epoch=$_lifecycleEpoch)',
+          );
+        } else {
+          AppLogger.info(
+            'BACKGROUND_GATE',
+            'armed=false (evaluating: faceStable=${_faceTracker.consecutiveStableDetections}/2, predictions=$_freshPredictionsAfterTransition/2)',
+          );
+        }
+      }
+
       // 5. Time-based Drowsiness State Machine Analysis (with PERCLOS and Head Nod)
       final previousAlert = _alertState;
       final analysisResult = _drowsinessAnalyzer.processPrediction(
@@ -659,7 +860,16 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         hasDriverFace: true,
         now: now,
       );
-      _alertState = analysisResult.alertState;
+
+      // Gate check: If background detection is not yet armed, prevent transition to warning or alarm
+      // unless an alarm was ALREADY confirmed and active before transition!
+      if (!_backgroundDetectionArmed &&
+          previousAlert != DriverAlertState.alarm) {
+        _alertState = DriverAlertState.normal;
+        _drowsinessAnalyzer.resetTransientEvidence();
+      } else {
+        _alertState = analysisResult.alertState;
+      }
 
       // Log detailed background diagnostics per Requirement 1 & 11
       if (isInBackground) {
@@ -674,7 +884,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
       _lastPrediction = prediction;
 
       // If recovering, temporarily suspend vibration so camera has stable, non-blurred frames!
-      if (_alertState == DriverAlertState.recovering || analysisResult.isRecovering) {
+      if (_alertState == DriverAlertState.recovering ||
+          analysisResult.isRecovering) {
         await _hapticService.suspendHapticTemporarily();
       }
 
@@ -685,7 +896,43 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         await _hapticService.stopAlarmHaptic();
         return;
       }
-      await _alarmController.sync(_alertState);
+
+      if (_alertState == DriverAlertState.alarm &&
+          previousAlert != DriverAlertState.alarm) {
+        AppLogger.warning(
+          'ALARM_TRIGGER',
+          'reason=DROWSINESS '
+              'closedDuration=${analysisResult.continuousClosedDuration.inMilliseconds}ms '
+              'threshold=${_drowsinessAnalyzer.config.alarmThreshold.inMilliseconds}ms '
+              'openRatio=${analysisResult.openRatio.toStringAsFixed(2)} '
+              'closedRatio=${analysisResult.closedRatio.toStringAsFixed(2)} '
+              'emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)} '
+              'predictionState=${prediction.state.name} '
+              'confidence=${prediction.confidence.toStringAsFixed(2)} '
+              'isHeadNod=${analysisResult.isHeadNodDetected} '
+              'isInBackground=$isInBackground '
+              'epoch=$_lifecycleEpoch',
+        );
+      }
+
+      await _alarmController.sync(
+        _alertState,
+        reason: _alertState == DriverAlertState.alarm
+            ? AlarmTriggerReason.drowsiness
+            : AlarmTriggerReason.none,
+        diagnostics: {
+          'closedDurationMs':
+              analysisResult.continuousClosedDuration.inMilliseconds,
+          'openRatio': analysisResult.openRatio,
+          'closedRatio': analysisResult.closedRatio,
+          'emaOpen': analysisResult.emaOpenConfidence,
+          'predictionState': prediction.state.name,
+          'confidence': prediction.confidence,
+          'isHeadNod': analysisResult.isHeadNodDetected,
+          'isInBackground': isInBackground,
+          'epoch': _lifecycleEpoch,
+        },
+      );
 
       // Single source of truth update
       _sessionState = _sessionState.copyWith(
@@ -700,12 +947,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
           : Duration.zero;
 
       _processedFramesCount++;
-      final elapsedSinceLast =
-          now.difference(_lastFrameProcessedTimestamp).inMilliseconds;
+      final elapsedSinceLast = now
+          .difference(_lastFrameProcessedTimestamp)
+          .inMilliseconds;
       if (elapsedSinceLast > 0) {
         final instantFps = 1000.0 / elapsedSinceLast;
-        _processedFps =
-            _processedFps == 0.0 ? instantFps : (_processedFps * 0.85 + instantFps * 0.15);
+        _processedFps = _processedFps == 0.0
+            ? instantFps
+            : (_processedFps * 0.85 + instantFps * 0.15);
       }
       _lastFrameProcessedTimestamp = now;
 
@@ -721,7 +970,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
 
   /// Throttles notifyListeners() to 2 Hz max to avoid excessive UI rebuilding in production.
   void _notifyThrottled(DateTime now, {bool force = false}) {
-    if (force || now.difference(_lastUiNotificationTimestamp) >= _uiThrottleInterval) {
+    if (force ||
+        now.difference(_lastUiNotificationTimestamp) >= _uiThrottleInterval) {
       _lastUiNotificationTimestamp = now;
       notifyListeners();
     }
@@ -748,11 +998,25 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         faces,
         timestamp: timestamp,
         roiStrategy: _roiStrategy,
+        lifecycleEpoch: _lifecycleEpoch,
       );
 
       if (_currentDriverFace != null) {
         _watchdog.recordFaceDetected(timestamp);
         _sessionState = _sessionState.copyWith(lastFaceDetectedAt: timestamp);
+        if (isInBackground) {
+          final box = _currentDriverFace!.boundingBox;
+          final roi = _currentDriverFace!.eyeRoi;
+          AppLogger.info(
+            'FACE_BG_TRACK',
+            'epoch=$_lifecycleEpoch '
+                'consecutiveStable=${_faceTracker.consecutiveStableDetections} '
+                'faceBox=[${box.left.toInt()},${box.top.toInt()},${box.width.toInt()}x${box.height.toInt()}] '
+                'eyeRoi=[${roi.left.toInt()},${roi.top.toInt()},${roi.width.toInt()}x${roi.height.toInt()}] '
+                'leftEyeProb=${_currentDriverFace!.leftEyeOpenProbability?.toStringAsFixed(2)} '
+                'rightEyeProb=${_currentDriverFace!.rightEyeOpenProbability?.toStringAsFixed(2)}',
+          );
+        }
       }
     } catch (e, st) {
       AppLogger.error(_tag, 'Face tracking error', e, st);
@@ -770,20 +1034,20 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     AppLogger.info(
       'BACKGROUND_DEBUG',
       'timestamp=${prediction.timestamp.toIso8601String()} '
-      'EyeState=${prediction.state.name} '
-      'openScore=${prediction.openScore.toStringAsFixed(3)} '
-      'closedScore=${prediction.closedScore.toStringAsFixed(3)} '
-      'confidence=${prediction.confidence.toStringAsFixed(3)} '
-      'openRatio=${analysisResult.openRatio.toStringAsFixed(2)} '
-      'closedRatio=${analysisResult.closedRatio.toStringAsFixed(2)} '
-      'unknownRatio=${analysisResult.unknownRatio.toStringAsFixed(2)} '
-      'emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)} '
-      'DriverAlertState=${analysisResult.alertState.name} '
-      'isRecovering=${analysisResult.isRecovering} '
-      'openDuration=${analysisResult.continuousOpenDuration.inMilliseconds}ms '
-      'closedDuration=${analysisResult.continuousClosedDuration.inMilliseconds}ms '
-      'alarmPlaying=$alarmPlaying '
-      'AppLifecycleState=${_currentLifecycleState.name}',
+          'EyeState=${prediction.state.name} '
+          'openScore=${prediction.openScore.toStringAsFixed(3)} '
+          'closedScore=${prediction.closedScore.toStringAsFixed(3)} '
+          'confidence=${prediction.confidence.toStringAsFixed(3)} '
+          'openRatio=${analysisResult.openRatio.toStringAsFixed(2)} '
+          'closedRatio=${analysisResult.closedRatio.toStringAsFixed(2)} '
+          'unknownRatio=${analysisResult.unknownRatio.toStringAsFixed(2)} '
+          'emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)} '
+          'DriverAlertState=${analysisResult.alertState.name} '
+          'isRecovering=${analysisResult.isRecovering} '
+          'openDuration=${analysisResult.continuousOpenDuration.inMilliseconds}ms '
+          'closedDuration=${analysisResult.continuousClosedDuration.inMilliseconds}ms '
+          'alarmPlaying=$alarmPlaying '
+          'AppLifecycleState=${_currentLifecycleState.name}',
     );
 
     // 2. High-visibility log per Phase 6
@@ -793,8 +1057,12 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
         ..writeln('open=${prediction.openScore.toStringAsFixed(2)}')
         ..writeln('closed=${prediction.closedScore.toStringAsFixed(2)}')
         ..writeln('openRatio=${analysisResult.openRatio.toStringAsFixed(2)}')
-        ..writeln('emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)}')
-        ..writeln('recoveryWindow=${analysisResult.continuousOpenDuration.inMilliseconds}ms');
+        ..writeln(
+          'emaOpen=${analysisResult.emaOpenConfidence.toStringAsFixed(2)}',
+        )
+        ..writeln(
+          'recoveryWindow=${analysisResult.continuousOpenDuration.inMilliseconds}ms',
+        );
 
       if (analysisResult.shouldStopAlarm) {
         buffer
@@ -869,45 +1137,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier with WidgetsBindingObse
     notifyListeners();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    handleAppLifecycleState(state);
-  }
-
-  /// App Lifecycle state handling:
-  /// CRITICAL (A2): Backgrounding the app (Home / Other app / Screen off) DOES NOT STOP MONITORING!
-  /// Monitoring continues via the Android Foreground Service and WakeLock.
+  /// App Lifecycle state handling delegation.
   void handleAppLifecycleState(AppLifecycleState state) {
-    _currentLifecycleState = state;
-    AppLogger.info(_tag, 'AppLifecycleState changed to: ${state.name}');
-    switch (state) {
-      case AppLifecycleState.paused:
-      case AppLifecycleState.inactive:
-      case AppLifecycleState.hidden:
-        if (_isMonitoring) {
-          AppLogger.info(
-            _tag,
-            'UI entered background (${state.name}). Driving monitoring session continues via Foreground Service.',
-          );
-        }
-        break;
-      case AppLifecycleState.resumed:
-        AppLogger.info(_tag, 'UI resumed. Syncing UI with active driving session.');
-        notifyListeners();
-        break;
-      case AppLifecycleState.detached:
-        // Decouple UI lifecycle from driving session lifecycle per Phase 2:
-        // Do NOT automatically destroy monitoring runtime if driving session is active!
-        if (!_isMonitoring) {
-          disposeResources();
-        } else {
-          AppLogger.warning(
-            _tag,
-            'UI detached while driving session is ACTIVE. Monitoring runtime preserved in foreground.',
-          );
-        }
-        break;
-    }
+    didChangeAppLifecycleState(state);
   }
 
   /// Clean up all hardware, watchdog, and native resources safely.
