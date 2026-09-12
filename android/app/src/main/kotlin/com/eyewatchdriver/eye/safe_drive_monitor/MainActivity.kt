@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleRegistry
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -147,6 +149,32 @@ class MainActivity : FlutterActivity() {
             headroom.toDouble()
         } catch (e: Exception) {
             -1.0
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Phase 25 & Android Lifecycle:
+        // When activity moves to background or screen turns off during an active driving session,
+        // re-dispatch ON_START so CameraX does not unbind or deactivate image analysis.
+        if (DriverMonitoringService.isServiceRunning) {
+            try {
+                (lifecycle as? LifecycleRegistry)?.handleLifecycleEvent(Lifecycle.Event.ON_START)
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Failed to keep lifecycle STARTED for background camera: $e")
+            }
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // Phase 2: Physical/system back button during active driving session:
+        // move task to back without destroying the Activity or Flutter monitoring runtime.
+        if (DriverMonitoringService.isServiceRunning) {
+            moveTaskToBack(true)
+        } else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
         }
     }
 }

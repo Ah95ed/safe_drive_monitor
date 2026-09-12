@@ -67,7 +67,7 @@ class FakeHapticService implements HapticService {
   Future<void> playWarningHaptic() async {}
 
   @override
-  Future<void> suspendHapticTemporarily() async {}
+  Future<void> suspendHapticTemporarily({Duration duration = const Duration(seconds: 5)}) async {}
 
   @override
   Future<void> dispose() async {
@@ -125,11 +125,11 @@ void main() {
         timestamp: now,
         lifecycleEpoch: 0,
       );
-      expect(tracker.currentDriverFace, isNotNull);
+      expect(tracker.lastValidFace, isNotNull);
 
       tracker.reset(1);
 
-      expect(tracker.currentDriverFace, isNull);
+      expect(tracker.lastValidFace, isNull);
       expect(tracker.isDriverFaceActive(now, epoch: 1), isFalse);
       expect(tracker.consecutiveStableDetections, equals(0));
     });

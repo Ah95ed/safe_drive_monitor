@@ -39,6 +39,11 @@ class MonitoringWatchdog {
   bool _isLightCriticallyLow = false;
   bool _isThermalThrottled = false;
 
+  int _cameraRecoveryAttempts = 0;
+  int _inferenceRecoveryAttempts = 0;
+  bool _isRecoveringCamera = false;
+  bool _isRecoveringInference = false;
+
   MonitoringHealth _currentHealth = MonitoringHealth.healthy;
   MonitoringIssue _currentIssue = MonitoringIssue.none;
 
@@ -47,6 +52,8 @@ class MonitoringWatchdog {
 
   bool get isRunning => _isRunning;
   int get stallRecoveryCount => _stallRecoveryCount;
+  int get cameraRecoveryAttempts => _cameraRecoveryAttempts;
+  int get inferenceRecoveryAttempts => _inferenceRecoveryAttempts;
   DateTime? get lastCameraFrameAt => _lastCameraFrameAt;
   DateTime? get lastHeartbeatTimestamp => _lastCameraFrameAt;
   DateTime? get lastInferenceAt => _lastInferenceAt;
@@ -59,6 +66,7 @@ class MonitoringWatchdog {
   /// Records arrival of a new CameraImage frame.
   void recordCameraFrameHeartbeat([DateTime? timestamp]) {
     _lastCameraFrameAt = timestamp ?? DateTime.now();
+    _cameraRecoveryAttempts = 0;
   }
 
   /// Alias for backward compatibility with existing camera stream calls.
@@ -69,6 +77,7 @@ class MonitoringWatchdog {
   /// Records a successful completion of an eye-state inference pass.
   void recordInferenceHeartbeat([DateTime? timestamp]) {
     _lastInferenceAt = timestamp ?? DateTime.now();
+    _inferenceRecoveryAttempts = 0;
   }
 
   /// Records a successful face detection/tracking frame.
@@ -116,7 +125,10 @@ class MonitoringWatchdog {
     if (_lastCameraFrameAt != null) {
       final frameAge = now.difference(_lastCameraFrameAt!);
       if (frameAge > cameraTimeout) {
-        return (health: MonitoringHealth.failed, issue: MonitoringIssue.cameraStalled);
+        final health = (_cameraRecoveryAttempts < 2)
+            ? MonitoringHealth.recovering
+            : MonitoringHealth.failed;
+        return (health: health, issue: MonitoringIssue.cameraStalled);
       }
     }
 
@@ -124,7 +136,10 @@ class MonitoringWatchdog {
     if (_lastCameraFrameAt != null && _lastInferenceAt != null) {
       final inferenceAge = now.difference(_lastInferenceAt!);
       if (inferenceAge > inferenceTimeout) {
-        return (health: MonitoringHealth.failed, issue: MonitoringIssue.inferenceStalled);
+        final health = (_inferenceRecoveryAttempts < 2)
+            ? MonitoringHealth.recovering
+            : MonitoringHealth.failed;
+        return (health: health, issue: MonitoringIssue.inferenceStalled);
       }
     }
 
@@ -148,11 +163,15 @@ class MonitoringWatchdog {
   }
 
   Future<void> Function()? _onCameraStallDetected;
+  Future<bool> Function({required int attempt})? _onCameraRecoveryRequested;
+  Future<bool> Function({required int attempt})? _onInferenceRecoveryRequested;
   void Function(MonitoringHealth health, MonitoringIssue issue)? _onHealthChanged;
 
   /// Starts the watchdog monitor with callbacks for stall recovery and health shifts.
   void start({
-    required Future<void> Function() onCameraStallDetected,
+    Future<void> Function()? onCameraStallDetected,
+    Future<bool> Function({required int attempt})? onCameraRecoveryRequested,
+    Future<bool> Function({required int attempt})? onInferenceRecoveryRequested,
     void Function(MonitoringHealth health, MonitoringIssue issue)? onHealthChanged,
   }) {
     stop();
@@ -162,9 +181,15 @@ class MonitoringWatchdog {
     _lastInferenceAt = now;
     _lastFaceDetectedAt = now;
     _lastServiceHeartbeatAt = now;
+    _cameraRecoveryAttempts = 0;
+    _inferenceRecoveryAttempts = 0;
+    _isRecoveringCamera = false;
+    _isRecoveringInference = false;
     _currentHealth = MonitoringHealth.healthy;
     _currentIssue = MonitoringIssue.none;
     _onCameraStallDetected = onCameraStallDetected;
+    _onCameraRecoveryRequested = onCameraRecoveryRequested;
+    _onInferenceRecoveryRequested = onInferenceRecoveryRequested;
     _onHealthChanged = onHealthChanged;
 
     _timer = Timer.periodic(config.checkInterval, (_) {
@@ -191,19 +216,67 @@ class MonitoringWatchdog {
       _onHealthChanged?.call(_currentHealth, _currentIssue);
     }
 
-    // Trigger automatic camera recovery if camera stalled
-    if (eval.issue == MonitoringIssue.cameraStalled) {
+    // Auto-Recovery Phase 6: Camera Stall Recovery
+    if (eval.issue == MonitoringIssue.cameraStalled && !_isRecoveringCamera) {
+      _isRecoveringCamera = true;
       _stallRecoveryCount++;
+      _cameraRecoveryAttempts++;
       AppLogger.warning(
         _tag,
-        'Camera frame stall confirmed. Triggering recovery #$_stallRecoveryCount...',
+        'Camera stream stall detected. Executing recovery attempt #$_cameraRecoveryAttempts...',
       );
-      // Reset timestamp to give recovery time to take effect
-      _lastCameraFrameAt = checkTime;
+
       try {
-        await _onCameraStallDetected?.call();
+        bool recovered = false;
+        if (_onCameraRecoveryRequested != null) {
+          recovered = await _onCameraRecoveryRequested!.call(attempt: _cameraRecoveryAttempts);
+        } else if (_onCameraStallDetected != null) {
+          await _onCameraStallDetected!.call();
+          recovered = true;
+        }
+
+        if (recovered) {
+          _lastCameraFrameAt = DateTime.now();
+          _cameraRecoveryAttempts = 0;
+          _currentHealth = MonitoringHealth.healthy;
+          _currentIssue = MonitoringIssue.none;
+          AppLogger.info(_tag, 'Camera auto-recovery succeeded. Restored healthy state.');
+          _onHealthChanged?.call(_currentHealth, _currentIssue);
+        }
       } catch (e, st) {
-        AppLogger.error(_tag, 'Watchdog camera recovery failed', e, st);
+        AppLogger.error(_tag, 'Camera recovery error on attempt #$_cameraRecoveryAttempts', e, st);
+      } finally {
+        _isRecoveringCamera = false;
+      }
+    }
+
+    // Auto-Recovery Phase 7: Inference Stall Recovery
+    if (eval.issue == MonitoringIssue.inferenceStalled && !_isRecoveringInference) {
+      _isRecoveringInference = true;
+      _inferenceRecoveryAttempts++;
+      AppLogger.warning(
+        _tag,
+        'Inference stall detected. Executing inference auto-recovery #$_inferenceRecoveryAttempts...',
+      );
+
+      try {
+        bool recovered = false;
+        if (_onInferenceRecoveryRequested != null) {
+          recovered = await _onInferenceRecoveryRequested!.call(attempt: _inferenceRecoveryAttempts);
+        }
+
+        if (recovered) {
+          _lastInferenceAt = DateTime.now();
+          _inferenceRecoveryAttempts = 0;
+          _currentHealth = MonitoringHealth.healthy;
+          _currentIssue = MonitoringIssue.none;
+          AppLogger.info(_tag, 'Inference auto-recovery succeeded. Restored healthy state.');
+          _onHealthChanged?.call(_currentHealth, _currentIssue);
+        }
+      } catch (e, st) {
+        AppLogger.error(_tag, 'Inference recovery error on attempt #$_inferenceRecoveryAttempts', e, st);
+      } finally {
+        _isRecoveringInference = false;
       }
     }
   }
@@ -214,11 +287,17 @@ class MonitoringWatchdog {
     _timer?.cancel();
     _timer = null;
     _onCameraStallDetected = null;
+    _onCameraRecoveryRequested = null;
+    _onInferenceRecoveryRequested = null;
     _onHealthChanged = null;
     _lastCameraFrameAt = null;
     _lastInferenceAt = null;
     _lastFaceDetectedAt = null;
     _lastServiceHeartbeatAt = null;
+    _cameraRecoveryAttempts = 0;
+    _inferenceRecoveryAttempts = 0;
+    _isRecoveringCamera = false;
+    _isRecoveringInference = false;
     _currentHealth = MonitoringHealth.healthy;
     _currentIssue = MonitoringIssue.none;
   }
@@ -227,6 +306,8 @@ class MonitoringWatchdog {
   void reset() {
     stop();
     _stallRecoveryCount = 0;
+    _cameraRecoveryAttempts = 0;
+    _inferenceRecoveryAttempts = 0;
   }
 }
 

@@ -7,6 +7,9 @@ enum MonitoringHealth {
   /// Monitoring is functioning completely normally with recent frames and inferences.
   healthy,
 
+  /// Monitoring has experienced a temporary stall and is actively attempting automatic recovery.
+  recovering,
+
   /// Monitoring is active but experiencing non-fatal degradation (e.g. low light, face temporarily lost, thermal throttle).
   degraded,
 
@@ -16,6 +19,7 @@ enum MonitoringHealth {
 
 extension MonitoringHealthX on MonitoringHealth {
   bool get isHealthy => this == MonitoringHealth.healthy;
+  bool get isRecovering => this == MonitoringHealth.recovering;
   bool get isDegraded => this == MonitoringHealth.degraded;
   bool get isFailed => this == MonitoringHealth.failed;
 
@@ -23,6 +27,8 @@ extension MonitoringHealthX on MonitoringHealth {
     switch (this) {
       case MonitoringHealth.healthy:
         return 'المراقبة نشطة ومستقرة';
+      case MonitoringHealth.recovering:
+        return 'جاري استعادة نظام المراقبة...';
       case MonitoringHealth.degraded:
         return 'المراقبة بحالة انخفاض كفاءة';
       case MonitoringHealth.failed:

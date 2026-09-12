@@ -263,6 +263,19 @@ class FakeEyeStateClassifier implements EyeStateClassifier {
   }
 
   @override
+  bool get isReady => isLoaded;
+
+  @override
+  Future<void> reinitialize() async {
+    isLoaded = true;
+  }
+
+  @override
+  Future<bool> runHealthCheck() async {
+    return true;
+  }
+
+  @override
   Future<void> dispose() async {
     isLoaded = false;
   }

@@ -39,6 +39,9 @@ abstract class EyeStateClassifier {
     Rect? dynamicRoi,
   });
   Future<EyePrediction> classifyFloat32(Float32List inputBuffer);
+  bool get isReady;
+  Future<void> reinitialize();
+  Future<bool> runHealthCheck();
   Future<void> dispose();
 }
 
@@ -392,6 +395,41 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     final bd = ByteData(4);
     bd.setUint32(0, fBits, Endian.little);
     return bd.getFloat32(0, Endian.little);
+  }
+
+  @override
+  bool get isReady => _interpreter != null;
+
+  @override
+  Future<void> reinitialize() async {
+    AppLogger.info(_tag, 'Reinitializing TFLite interpreter...');
+    await dispose();
+    await load();
+  }
+
+  @override
+  Future<bool> runHealthCheck() async {
+    if (_interpreter == null) {
+      try {
+        await load();
+      } catch (e) {
+        return false;
+      }
+    }
+    if (_interpreter == null) return false;
+
+    try {
+      final inputTensor = _interpreter!.getInputTensor(0);
+      final shape = inputTensor.shape;
+      final int totalFloats = shape.reduce((a, b) => a * b);
+      final dummyBuffer = Float32List(totalFloats);
+      final prediction = await classifyFloat32(dummyBuffer);
+      AppLogger.info(_tag, 'TFLite health check passed with prediction: ${prediction.state.name}');
+      return true;
+    } catch (e, st) {
+      AppLogger.error(_tag, 'TFLite health check failed', e, st);
+      return false;
+    }
   }
 
   @override

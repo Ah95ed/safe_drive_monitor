@@ -40,7 +40,7 @@ void main() {
       expect(eval.issue, MonitoringIssue.none);
     });
 
-    test('Detects camera stall when frames stop arriving', () {
+    test('Detects camera stall and transitions to recovering state', () {
       watchdog.start(onCameraStallDetected: () async {});
       final startTime = DateTime.now();
 
@@ -50,11 +50,12 @@ void main() {
       final lateTime = startTime.add(const Duration(milliseconds: 1200));
       final eval = watchdog.evaluateHealth(lateTime);
 
-      expect(eval.health, MonitoringHealth.failed);
+      // Phase 13: Initial stall triggers auto-recovery state instead of immediate failure
+      expect(eval.health, MonitoringHealth.recovering);
       expect(eval.issue, MonitoringIssue.cameraStalled);
     });
 
-    test('Detects inference stall when frames arrive but AI does not process', () {
+    test('Detects inference stall and transitions to recovering state', () {
       watchdog.start(onCameraStallDetected: () async {});
       final startTime = DateTime.now();
 
@@ -66,7 +67,8 @@ void main() {
 
       final eval = watchdog.evaluateHealth(lateTime);
 
-      expect(eval.health, MonitoringHealth.failed);
+      // Phase 13: Initial stall triggers auto-recovery state instead of immediate failure
+      expect(eval.health, MonitoringHealth.recovering);
       expect(eval.issue, MonitoringIssue.inferenceStalled);
     });
 

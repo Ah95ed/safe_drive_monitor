@@ -71,6 +71,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
 
   // Background Transition Gate & Epoch Tracking (Fix False Alarm on Background Transition)
   DateTime? _lastLifecycleTransitionAt;
+  DateTime? _firstBackgroundFrameAt;
+  DateTime? _firstBackgroundInferenceAt;
   int _lifecycleEpoch = 0;
   bool _backgroundDetectionArmed = true;
   int _freshPredictionsAfterTransition = 0;
@@ -176,6 +178,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     if (isMovingToBackground && _isMonitoring) {
       final now = DateTime.now();
       _lastLifecycleTransitionAt = now;
+      _firstBackgroundFrameAt = null;
+      _firstBackgroundInferenceAt = null;
       _lifecycleEpoch++;
       _freshPredictionsAfterTransition = 0;
 
@@ -223,6 +227,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     if (isMovingToForeground && _isMonitoring) {
       final now = DateTime.now();
       _lastLifecycleTransitionAt = now;
+      _firstBackgroundFrameAt = null;
+      _firstBackgroundInferenceAt = null;
       _lifecycleEpoch++;
       _backgroundDetectionArmed = true;
       _freshPredictionsAfterTransition = 0;
@@ -484,6 +490,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       // 5. Start Safety Watchdog
       _watchdog.start(
         onCameraStallDetected: _recoverCameraStream,
+        onCameraRecoveryRequested: _handleCameraRecovery,
+        onInferenceRecoveryRequested: _handleInferenceRecovery,
         onHealthChanged: _handleWatchdogHealthChanged,
       );
 
@@ -595,13 +603,22 @@ class DrowsinessDetectionProvider extends ChangeNotifier
 
     _sessionState = _sessionState.copyWith(health: health, issue: issue);
 
-    if (health == MonitoringHealth.failed) {
+    if (health == MonitoringHealth.recovering) {
+      // Phase 13 & 14: Silent recovering state - no warning sounds or vibrations
+      _statusMessage = '🔄 جاري استعادة نظام المراقبة...';
+      _foregroundService.updateNotificationStatus(
+        '🔄 إعادة تشغيل نظام المراقبة...',
+      );
+      AppLogger.info(_tag, 'Monitoring state: RECOVERING (issue: ${issue.name}). Auto-recovery in progress...');
+    } else if (health == MonitoringHealth.failed) {
+      // Phase 14 & 15: Failed after exhausting recovery attempts - trigger distinct technical warning
       _statusMessage = 'تنبيه عطل فني: ${issue.arabicDescription}';
       _audioAlarmService.playTechnicalWarning();
       _hapticService.playWarningHaptic();
       _foregroundService.updateNotificationStatus(
-        '⚠️ توقف نظام المراقبة: ${issue.arabicDescription}',
+        '⚠️ تعذر استعادة المراقبة: ${issue.arabicDescription}',
       );
+      AppLogger.warning(_tag, 'Monitoring state: FAILED (issue: ${issue.name}). Technical warning emitted.');
     } else if (health == MonitoringHealth.degraded) {
       _statusMessage = 'انخفاض كفاءة: ${issue.arabicDescription}';
       if (issue == MonitoringIssue.insufficientLight) {
@@ -622,34 +639,90 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     notifyListeners();
   }
 
-  /// Automatic watchdog recovery when camera frame stream stalls.
-  Future<void> _recoverCameraStream() async {
-    if (!_isMonitoring || _disposed) return;
+  /// Phase 6: Camera Auto-Recovery Pipeline.
+  /// Attempt 1: Stop image stream -> safe delay -> restart image stream -> wait for fresh frame.
+  /// Attempt 2: Re-initialize single active CameraController -> restart image stream -> wait for fresh frame.
+  /// Attempt 3+: Return false (leads to MonitoringHealth.failed).
+  Future<bool> _handleCameraRecovery({required int attempt}) async {
+    if (!_isMonitoring || _disposed) return false;
 
-    AppLogger.warning(_tag, 'Executing watchdog camera stream recovery...');
+    AppLogger.warning(_tag, 'Executing camera auto-recovery attempt #$attempt...');
+
     try {
-      await _cameraService.stopImageStream();
-      await Future.delayed(const Duration(milliseconds: 100));
-      await _cameraService.startImageStream(_handleCameraFrame);
-      AppLogger.info(_tag, 'Watchdog stream recovery successful.');
-    } catch (e) {
-      AppLogger.error(
-        _tag,
-        'Soft recovery failed, re-initializing camera...',
-        e,
-      );
-      try {
-        await _cameraService.dispose();
+      if (attempt == 1) {
+        // Attempt 1: Soft restart of camera image stream
+        try {
+          await _cameraService.stopImageStream();
+        } catch (_) {}
         await Future.delayed(const Duration(milliseconds: 150));
-        await _cameraService.initialize(
-          lensDirection: CameraLensDirection.front,
-        );
         await _cameraService.startImageStream(_handleCameraFrame);
-        AppLogger.info(_tag, 'Full camera re-init recovery successful.');
-      } catch (err, st) {
-        AppLogger.error(_tag, 'Fatal watchdog recovery error', err, st);
+      } else {
+        // Attempt 2: Re-initialize camera controller guaranteeing ONE active controller
+        try {
+          await _cameraService.stopImageStream();
+        } catch (_) {}
+        await _cameraService.dispose();
+        await Future.delayed(const Duration(milliseconds: 200));
+        await _cameraService.initialize(lensDirection: CameraLensDirection.front);
+        await _cameraService.startImageStream(_handleCameraFrame);
       }
+
+      // Wait up to 1500ms for a fresh frame to arrive
+      final startWait = DateTime.now();
+      while (DateTime.now().difference(startWait) < const Duration(milliseconds: 1500)) {
+        if (_disposed || !_isMonitoring) return false;
+        final lastFrame = _watchdog.lastCameraFrameAt;
+        if (lastFrame != null && lastFrame.isAfter(startWait)) {
+          AppLogger.info(_tag, 'Camera auto-recovery #$attempt successful! Fresh frame received.');
+          return true;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      AppLogger.warning(_tag, 'Camera auto-recovery #$attempt timed out waiting for fresh frame.');
+      return false;
+    } catch (e, st) {
+      AppLogger.error(_tag, 'Camera auto-recovery #$attempt failed', e, st);
+      return false;
     }
+  }
+
+  /// Phase 7: Inference Auto-Recovery Pipeline.
+  /// If frames are arriving but inference has stalled:
+  /// 1. Reset processing & face detection locks (Phase 8 & 9).
+  /// 2. Reinitialize TFLite interpreter.
+  /// 3. Run health-check inference.
+  Future<bool> _handleInferenceRecovery({required int attempt}) async {
+    if (!_isMonitoring || _disposed) return false;
+
+    AppLogger.warning(_tag, 'Executing inference auto-recovery attempt #$attempt...');
+
+    try {
+      // 1. Reset processing locks (Phase 8 & 9)
+      _isProcessingFrame = false;
+      _isDetectingFace = false;
+
+      // 2. Reinitialize TFLite classifier
+      await _classifier.reinitialize();
+
+      // 3. Run health-check inference on dummy tensor
+      final ok = await _classifier.runHealthCheck();
+      if (ok) {
+        AppLogger.info(_tag, 'Inference auto-recovery #$attempt successful! Health check passed.');
+        return true;
+      }
+      return false;
+    } catch (e, st) {
+      AppLogger.error(_tag, 'Inference auto-recovery #$attempt error', e, st);
+      return false;
+    } finally {
+      _isProcessingFrame = false;
+      _isDetectingFace = false;
+    }
+  }
+
+  /// Backwards compatibility camera stall recovery callback.
+  Future<void> _recoverCameraStream() async {
+    await _handleCameraRecovery(attempt: 1);
   }
 
   /// Process camera frame callback with non-blocking guard.
@@ -660,6 +733,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     // 1. Record frame heartbeat in safety watchdog
     _watchdog.recordCameraFrameHeartbeat(now);
     _sessionState = _sessionState.copyWith(lastCameraFrameAt: now);
+
+    if (isInBackground && _firstBackgroundFrameAt == null) {
+      _firstBackgroundFrameAt = now;
+      final latency = _lastLifecycleTransitionAt != null
+          ? now.difference(_lastLifecycleTransitionAt!).inMilliseconds
+          : 0;
+      AppLogger.info(_tag, 'Phase 17: First background frame arrived. Latency: ${latency}ms');
+    }
 
     // 2. Compute luminance on Y plane
     _lightingManager.processCameraImage(image);
@@ -756,6 +837,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier
         _watchdog.recordInferenceHeartbeat(now);
         _sessionState = _sessionState.copyWith(lastInferenceAt: now);
 
+        if (isInBackground && _firstBackgroundInferenceAt == null) {
+          _firstBackgroundInferenceAt = now;
+          final latency = _lastLifecycleTransitionAt != null
+              ? now.difference(_lastLifecycleTransitionAt!).inMilliseconds
+              : 0;
+          AppLogger.info(_tag, 'Phase 17: First background inference (eval) completed. Latency: ${latency}ms');
+        }
+
         // Ensure alarm and any audio is completely stopped if no face is in frame
         await _alarmController.stop();
         await _audioAlarmService.stopAlarm();
@@ -830,6 +919,14 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       // Record successful inference heartbeat in watchdog
       _watchdog.recordInferenceHeartbeat(now);
       _sessionState = _sessionState.copyWith(lastInferenceAt: now);
+
+      if (isInBackground && _firstBackgroundInferenceAt == null) {
+        _firstBackgroundInferenceAt = now;
+        final latency = _lastLifecycleTransitionAt != null
+            ? now.difference(_lastLifecycleTransitionAt!).inMilliseconds
+            : 0;
+        AppLogger.info(_tag, 'Phase 17: First background inference completed. Latency: ${latency}ms');
+      }
 
       // Transition Gate: count fresh predictions after transition and evaluate arming
       if (!_backgroundDetectionArmed) {
