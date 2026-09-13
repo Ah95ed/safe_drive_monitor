@@ -64,20 +64,4 @@ class SecurityEnvironmentService {
     }
     return SecurityEnvironmentAssessment.safe();
   }
-
-  /// Retrieves the hardware-backed Android Keystore device public key (X.509 Base64)
-  /// used for wrapping model decryption keys and device attestation.
-  static Future<String?> getDeviceAttestationPublicKey() async {
-    try {
-      final dynamic result = await _channel.invokeMethod('getDeviceAttestationPublicKey');
-      if (result is String && result.isNotEmpty) {
-        return result;
-      }
-    } on PlatformException catch (e) {
-      AppLogger.error(_tag, 'Failed to get device attestation key: ${e.message}');
-    } catch (e) {
-      AppLogger.error(_tag, 'Unexpected error fetching attestation key: $e');
-    }
-    return null;
-  }
 }

@@ -8,16 +8,15 @@ Write-Host "==================================================" -ForegroundColor
 $hasCriticalFailure = $false
 $violations = @()
 
-# 1. Verify Raw .tflite Files in Assets
-Write-Host "`n[Audit 1/6] Checking for unencrypted raw .tflite models in assets..."
-$rawModels = Get-ChildItem -Path "assets" -Recurse -Filter "*.tflite" -ErrorAction SilentlyContinue
-if ($rawModels) {
-    $hasCriticalFailure = $true
-    foreach ($m in $rawModels) {
-        $violations += "[CRITICAL] Raw plaintext TFLite model found in assets: $($m.FullName)"
-    }
+# 1. Verify Model Asset in Assets
+Write-Host "`n[Audit 1/6] Verifying presence of official TFLite model asset..."
+$modelFile = "assets/models/eye_detector_5n_320_float16.tflite"
+if (Test-Path $modelFile) {
+    $size = (Get-Item $modelFile).Length
+    Write-Host "  PASSED: Official TFLite model asset present ($size bytes)." -ForegroundColor Green
 } else {
-    Write-Host "  PASSED: No plaintext .tflite models bundled in assets." -ForegroundColor Green
+    $hasCriticalFailure = $true
+    $violations += "[CRITICAL] Required TFLite model asset not found at: $modelFile"
 }
 
 # 2. Check for Private Keys in Versioned Directories

@@ -63,18 +63,3 @@ class MonitoringRecoveryException extends AppException {
 class ThermalException extends AppException {
   const ThermalException(super.message, [super.cause]);
 }
-
-/// Thrown when secure model delivery, attestation, downloading, or verification fails.
-class ModelDeliveryException extends AppException {
-  final String errorCode;
-
-  const ModelDeliveryException({
-    required this.errorCode,
-    required String userMessage,
-    Object? originalError,
-  }) : super(userMessage, originalError);
-
-  @override
-  String toString() =>
-      'ModelDeliveryException [$errorCode]: $message${cause != null ? ' (Cause: $cause)' : ''}';
-}

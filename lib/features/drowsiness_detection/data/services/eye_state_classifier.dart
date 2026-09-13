@@ -6,11 +6,9 @@ import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/models/eye_prediction_model.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/image_preprocessor.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/secure_model_manager.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/detection_pipeline.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/model_output_mode.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/ready_model.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/roi_strategy.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -33,8 +31,7 @@ abstract class EyeStateClassifier {
   set useDirectFastPipeline(bool value);
   set roiStrategy(RoiStrategy value);
 
-  Future<void> load({ReadyModel? readyModel});
-  Future<void> initializeWithModel(ReadyModel readyModel);
+  Future<void> load();
   Future<EyePrediction> classify(
     CameraImage image, {
     int sensorRotation = 0,
@@ -109,42 +106,16 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     _preprocessor.pipeline = pipeline;
   }
 
-  ReadyModel? _activeModel;
-
   @override
-  Future<void> initializeWithModel(ReadyModel readyModel) async {
-    _activeModel = readyModel;
-    await _loadInterpreterFromBytes(readyModel.bytes);
-  }
-
-  @override
-  Future<void> load({ReadyModel? readyModel}) async {
+  Future<void> load() async {
     if (_interpreter != null) return;
-    if (readyModel != null) {
-      await initializeWithModel(readyModel);
-      return;
-    }
 
-    final modelManager = SecureModelManager();
-    if (modelManager.isModelReady && modelManager.readyModel != null) {
-      await initializeWithModel(modelManager.readyModel!);
-      return;
-    }
-
-    AppLogger.info(_tag, 'Requesting model bootstrap from SecureModelManager...');
-    final model = await modelManager.initialize();
-    await initializeWithModel(model);
-  }
-
-  Future<void> _loadInterpreterFromBytes(Uint8List modelBytes) async {
     try {
-      if (_interpreter != null) {
-        _interpreter!.close();
-        _interpreter = null;
-      }
-
       final options = InterpreterOptions()..threads = 2;
-      _interpreter = Interpreter.fromBuffer(modelBytes, options: options);
+      _interpreter = await Interpreter.fromAsset(
+        ModelConstants.modelAssetPath,
+        options: options,
+      );
 
       // Pre-allocate tensors on load
       _interpreter!.allocateTensors();
@@ -153,10 +124,10 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       final outputTensors = _interpreter!.getOutputTensors();
 
       if (inputTensors.isEmpty) {
-        throw const ModelLoadException('TFLite model has no input tensors');
+        throw const ModelLoadException('MODEL_CONTRACT_INVALID: TFLite model has no input tensors');
       }
       if (outputTensors.isEmpty) {
-        throw const ModelLoadException('TFLite model has no output tensors');
+        throw const ModelLoadException('MODEL_CONTRACT_INVALID: TFLite model has no output tensors');
       }
 
       final inputTensor = inputTensors.first;
@@ -167,7 +138,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
           inputTensor.shape[0] != 1 ||
           inputTensor.shape[3] != 3) {
         throw ModelLoadException(
-          'TFLite model input shape mismatch: got ${inputTensor.shape}, expected [1, H, W, 3]',
+          'MODEL_CONTRACT_INVALID: TFLite model input shape mismatch: got ${inputTensor.shape}, expected [1, H, W, 3]',
         );
       }
 
@@ -179,7 +150,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       if (inputTensor.type != TensorType.float32 &&
           inputTensor.type != TensorType.float16) {
         throw ModelLoadException(
-          'TFLite model input type mismatch: got ${inputTensor.type}, expected ${TensorType.float32} or ${TensorType.float16}',
+          'MODEL_CONTRACT_INVALID: TFLite model input type mismatch: got ${inputTensor.type}, expected ${TensorType.float32} or ${TensorType.float16}',
         );
       }
 
@@ -193,7 +164,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
 
       if (!isYolo && !isClassification) {
         throw ModelLoadException(
-          'Unsupported TFLite output shape: ${outputTensor.shape}. '
+          'MODEL_CONTRACT_INVALID: Unsupported TFLite output shape: ${outputTensor.shape}. '
           'Expected [1, 2] (classification) or [1, N, 7] (YOLO detector)',
         );
       }
@@ -209,7 +180,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
 
       AppLogger.info(
         'CLASSIFIER_READY',
-        'TFLite model loaded successfully: architecture=${_architecture.name}, '
+        'TFLite model loaded successfully from asset: architecture=${_architecture.name}, '
         'input=${inputTensor.shape} (${inputTensor.type.name}), '
         'output=${outputTensor.shape} (${outputTensor.type.name}), '
         'normalization=${_preprocessor.normalization.name}',
@@ -217,7 +188,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     } catch (e, st) {
       AppLogger.error(_tag, 'Failed to load or validate TFLite model', e, st);
       if (e is AppException) rethrow;
-      throw ModelLoadException('Failed to load eye state TFLite model: $e', e);
+      throw ModelLoadException('MODEL_ASSET_LOAD_FAILED', e);
     }
   }
 
@@ -432,7 +403,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
   Future<void> reinitialize() async {
     AppLogger.info(_tag, 'Reinitializing TFLite interpreter...');
     await dispose();
-    await load(readyModel: _activeModel);
+    await load();
   }
 
   @override

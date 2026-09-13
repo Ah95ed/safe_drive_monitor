@@ -70,11 +70,15 @@ Write-Host "  Analyzing compiled artifact: $artifactPath"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $artifactPath).Path)
 
-$prohibitedPatterns = @("*.tflite", "*.env", "*secrets*", "*.private.*", "*.symbols", "key.properties")
+$prohibitedPatterns = @("*.env", "*secrets*", "*.private.*", "*.symbols", "key.properties")
 $leakedEntries = @()
+$hasModelAsset = $false
 
 foreach ($entry in $zip.Entries) {
     $name = $entry.FullName
+    if ($name -like "*eye_detector_5n_320_float16.tflite*") {
+        $hasModelAsset = $true
+    }
     foreach ($pat in $prohibitedPatterns) {
         if ($name -like $pat) {
             $leakedEntries += $name
@@ -89,8 +93,11 @@ if ($leakedEntries.Count -gt 0) {
         Write-Host "    - $l" -ForegroundColor Red
     }
     exit 1
+} elseif (-not $hasModelAsset) {
+    Write-Host "  CRITICAL ERROR: Official TFLite model was NOT bundled into $artifactPath" -ForegroundColor Red
+    exit 1
 } else {
-    Write-Host "  PASSED: Archive verified clean! Zero secrets, raw models, or symbols bundled." -ForegroundColor Green
+    Write-Host "  PASSED: Archive verified! Model asset bundled and zero secrets or private symbols leaked." -ForegroundColor Green
 }
 
 # Verify Symbol Files were saved to private_build_symbols/

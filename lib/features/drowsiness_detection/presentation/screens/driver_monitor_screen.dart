@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
@@ -291,89 +290,49 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                           : AppColors.primaryCyan.withValues(alpha: 0.4),
                                     ),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                  child: Row(
                                     children: [
-                                      Row(
-                                        children: [
-                                          if (provider.modelState.isBusy)
-                                            const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2.2,
-                                                color: AppColors.primaryCyan,
-                                              ),
-                                            )
-                                          else if (provider.modelState.isFailed)
-                                            const Icon(
-                                              Icons.error_outline_rounded,
-                                              color: AppColors.alarmRed,
-                                              size: 20,
-                                            )
-                                          else
-                                            const Icon(
-                                              Icons.cloud_download_rounded,
-                                              color: AppColors.primaryCyan,
-                                              size: 20,
-                                            ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              provider.modelState == ModelState.downloading
-                                                  ? 'جاري تنزيل نموذج الذكاء الاصطناعي... ${(provider.modelDownloadProgress * 100).toInt()}%'
-                                                  : provider.modelState.arabicLabel,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                                color: provider.modelState.isFailed
-                                                    ? AppColors.alarmRed
-                                                    : AppColors.textPrimary,
-                                              ),
-                                            ),
-                                          ),
-                                          if (provider.modelState.isFailed)
-                                            TextButton.icon(
-                                              onPressed: () => provider.retryModelBootstrap(),
-                                              icon: const Icon(Icons.refresh, size: 16, color: AppColors.primaryCyan),
-                                              label: const Text(
-                                                'إعادة المحاولة',
-                                                style: TextStyle(
-                                                  color: AppColors.primaryCyan,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      if (provider.modelState == ModelState.downloading) ...[
-                                        const SizedBox(height: 8),
-                                        ClipRRect(
-                                          borderRadius: BorderRadius.circular(6),
-                                          child: LinearProgressIndicator(
-                                            value: provider.modelDownloadProgress > 0
-                                                ? provider.modelDownloadProgress
-                                                : null,
-                                            backgroundColor: Colors.white10,
+                                      if (provider.modelState.isBusy)
+                                        const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.2,
                                             color: AppColors.primaryCyan,
-                                            minHeight: 5,
+                                          ),
+                                        )
+                                      else if (provider.modelState.isFailed)
+                                        const Icon(
+                                          Icons.error_outline_rounded,
+                                          color: AppColors.alarmRed,
+                                          size: 20,
+                                        ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          provider.modelState.arabicLabel,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: provider.modelState.isFailed
+                                                ? AppColors.alarmRed
+                                                : AppColors.textPrimary,
                                           ),
                                         ),
-                                      ],
-                                      if (provider.modelState.isFailed &&
-                                          kDebugMode &&
-                                          provider.modelErrorCode != null) ...[
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          'Error Code: ${provider.modelErrorCode}',
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.grey,
-                                            fontFamily: 'monospace',
+                                      ),
+                                      if (provider.modelState.isFailed)
+                                        TextButton.icon(
+                                          onPressed: () => provider.retryModelBootstrap(),
+                                          icon: const Icon(Icons.refresh, size: 16, color: AppColors.primaryCyan),
+                                          label: const Text(
+                                            'إعادة المحاولة',
+                                            style: TextStyle(
+                                              color: AppColors.primaryCyan,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                            ),
                                           ),
                                         ),
-                                      ],
                                     ],
                                   ),
                                 ),
