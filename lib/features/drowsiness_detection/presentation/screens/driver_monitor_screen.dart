@@ -5,10 +5,9 @@ import 'package:safe_drive_monitor/core/constants/model_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/monitoring_health_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/providers/drowsiness_detection_provider.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/screens/driving_hud_screen.dart';
-import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/screens/safety_disclaimer_screen.dart';
-import 'package:safe_drive_monitor/features/onboarding/presentation/screens/onboarding_screen.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/alert_banner_overlay.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/app_drawer.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/camera_feed_view.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/driver_status_card.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/widgets/primary_action_button.dart';
@@ -89,38 +88,32 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
           child: Scaffold(
             backgroundColor:
                 isAlarm ? const Color(0xFF2A0909) : AppColors.background,
+          drawer: const AppDrawer(),
           appBar: AppBar(
             backgroundColor:
                 isAlarm ? AppColors.alarmRed : AppColors.surface,
-            title: const Row(
+            leading: Builder(
+              builder: (ctx) => IconButton(
+                icon: const Icon(Icons.menu_rounded, color: AppColors.primaryCyan),
+                tooltip: context.tr('menu'),
+                onPressed: () => Scaffold.of(ctx).openDrawer(),
+              ),
+            ),
+            title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.directions_car_filled, color: AppColors.primaryCyan),
-                SizedBox(width: 8),
+                const Icon(Icons.directions_car_filled, color: AppColors.primaryCyan, size: 22),
+                const SizedBox(width: 8),
                 Text(
-                  'مراقبة يقظة السائق',
-                  style: TextStyle(
-                    fontSize: 18,
+                  context.tr('app_title'),
+                  style: const TextStyle(
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
             actions: [
-              // Test Alarm action button
-              IconButton(
-                icon: const Icon(Icons.volume_up_rounded, color: AppColors.primaryCyan),
-                tooltip: 'فحص الإنذار الصوتي والاهتزاز (Test Alarm)',
-                onPressed: () async {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('جاري تشغيل تجربة الإنذار الصوتي والاهتزاز لمدة ثانيتين...'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                  await provider.testAlarm();
-                },
-              ),
               if (provider.isMonitoring)
                 IconButton(
                   icon: Icon(
@@ -136,71 +129,6 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                       : 'تفعيل وضع توفير الطاقة (OLED Saver)',
                   onPressed: provider.togglePowerSaverMode,
                 ),
-              IconButton(
-                icon: const Icon(Icons.speed_rounded, color: AppColors.primaryCyan),
-                tooltip: 'وضع القيادة المظلمة (HUD Mode)',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const DrivingHudScreen(),
-                    ),
-                  );
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.info_outline, color: AppColors.textSecondary),
-                tooltip: 'إرشادات السلامة',
-                onPressed: () => SafetyDisclaimerDialog.show(context),
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: AppColors.textSecondary),
-                tooltip: 'الدليل والخيارات',
-                color: AppColors.surfaceElevated,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: const BorderSide(color: AppColors.border),
-                ),
-                onSelected: (value) {
-                  if (value == 'onboarding') {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            const OnboardingScreen(isFirstLaunch: false),
-                      ),
-                    );
-                  } else if (value == 'safety') {
-                    SafetyDisclaimerDialog.show(context);
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'onboarding',
-                    child: Row(
-                      children: [
-                        Icon(Icons.menu_book_rounded,
-                            color: AppColors.primaryCyan, size: 20),
-                        SizedBox(width: 10),
-                        Text('عرض دليل البداية',
-                            style: TextStyle(
-                                color: AppColors.textPrimary, fontSize: 13.5)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'safety',
-                    child: Row(
-                      children: [
-                        Icon(Icons.shield_outlined,
-                            color: AppColors.primaryCyan, size: 20),
-                        SizedBox(width: 10),
-                        Text('إرشادات السلامة والخصوصية',
-                            style: TextStyle(
-                                color: AppColors.textPrimary, fontSize: 13.5)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
           body: Stack(

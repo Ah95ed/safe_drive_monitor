@@ -5,6 +5,7 @@ class AppConstants {
   AppConstants._();
 
   static const String appTitle = 'Safe Drive Monitor';
+  static const String appVersion = '1.0.2';
   static const String alarmSoundAsset = 'sounds/alarm.mp3';
   static const String technicalWarningSoundAsset = 'sounds/alarm.mp3';
 

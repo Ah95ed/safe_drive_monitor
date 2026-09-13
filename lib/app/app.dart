@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 import 'package:safe_drive_monitor/app/theme/app_theme.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
+import 'package:safe_drive_monitor/core/localization/locale_provider.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/providers/drowsiness_detection_provider.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/screens/driver_monitor_screen.dart';
 import 'package:safe_drive_monitor/features/onboarding/data/services/onboarding_preferences_service.dart';
@@ -22,22 +24,31 @@ class SafeDriveApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(
+          create: (_) => LocaleProvider(),
+        ),
+        ChangeNotifierProvider(
           create: (_) => DrowsinessDetectionProvider(),
         ),
       ],
-      child: MaterialApp(
-        title: AppConstants.appTitle,
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.darkTheme,
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: const [
-          Locale('ar'),
-          Locale('en'),
-        ],
+      child: Consumer<LocaleProvider>(
+        builder: (context, localeProvider, child) {
+          return MaterialApp(
+            title: AppConstants.appTitle,
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.darkTheme,
+            locale: localeProvider.currentLocale,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: const [
+              Locale('ar'),
+              Locale('en'),
+              Locale('fr'),
+              Locale('es'),
+            ],
         home: initialOnboardingCompleted != null
             ? (initialOnboardingCompleted!
                 ? const DriverMonitorScreen()
@@ -62,6 +73,8 @@ class SafeDriveApp extends StatelessWidget {
                   return const OnboardingScreen(isFirstLaunch: true);
                 },
               ),
+          );
+        },
       ),
     );
   }
