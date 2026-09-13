@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
 
 class PrimaryActionButton extends StatelessWidget {
   final bool isMonitoring;
@@ -15,6 +16,8 @@ class PrimaryActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = context.loc;
+
     return SizedBox(
       width: double.infinity,
       height: 58,
@@ -37,7 +40,7 @@ class PrimaryActionButton extends StatelessWidget {
           size: 28,
         ),
         label: Text(
-          isMonitoring ? 'إيقاف المراقبة (STOP)' : 'بدء المراقبة (START MONITORING)',
+          isMonitoring ? loc.translate('btn_stop_monitoring') : loc.translate('btn_start_monitoring'),
           style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,

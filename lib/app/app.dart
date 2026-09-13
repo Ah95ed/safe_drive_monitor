@@ -48,6 +48,9 @@ class SafeDriveApp extends StatelessWidget {
               Locale('en'),
               Locale('fr'),
               Locale('es'),
+              Locale('hi'),
+              Locale('zh'),
+              Locale('ja'),
             ],
         home: initialOnboardingCompleted != null
             ? (initialOnboardingCompleted!

@@ -50,7 +50,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textPrimary),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            color: AppColors.textPrimary,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -70,8 +73,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.language_rounded,
-                        color: AppColors.primaryCyan, size: 22),
+                    const Icon(
+                      Icons.language_rounded,
+                      color: AppColors.primaryCyan,
+                      size: 22,
+                    ),
                     const SizedBox(width: 10),
                     Text(
                       loc.translate('language_section_title'),
@@ -95,8 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                 // Language Choices List
                 ...AppLanguage.values.map((lang) {
-                  final isSelected =
-                      localeProvider.currentLanguage == lang;
+                  final isSelected = localeProvider.currentLanguage == lang;
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
@@ -114,7 +119,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     child: ListTile(
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 2),
+                        horizontal: 14,
+                        vertical: 2,
+                      ),
                       leading: Text(
                         lang.flag,
                         style: const TextStyle(fontSize: 24),
@@ -139,10 +146,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       trailing: isSelected
-                          ? const Icon(Icons.check_circle,
-                              color: AppColors.primaryCyan, size: 22)
-                          : const Icon(Icons.circle_outlined,
-                              color: AppColors.textSecondary, size: 20),
+                          ? const Icon(
+                              Icons.check_circle,
+                              color: AppColors.primaryCyan,
+                              size: 22,
+                            )
+                          : const Icon(
+                              Icons.circle_outlined,
+                              color: AppColors.textSecondary,
+                              size: 20,
+                            ),
                       onTap: () => localeProvider.setLanguage(lang),
                     ),
                   );
@@ -165,8 +178,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.security_rounded,
-                        color: AppColors.primaryCyan, size: 22),
+                    const Icon(
+                      Icons.security_rounded,
+                      color: AppColors.primaryCyan,
+                      size: 22,
+                    ),
                     const SizedBox(width: 10),
                     Text(
                       loc.translate('device_security_title'),
@@ -225,8 +241,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.privacy_tip_outlined,
-                        color: AppColors.primaryCyan, size: 22),
+                    const Icon(
+                      Icons.privacy_tip_outlined,
+                      color: AppColors.primaryCyan,
+                      size: 22,
+                    ),
                     const SizedBox(width: 10),
                     Text(
                       loc.translate('privacy_policy_title'),
@@ -265,8 +284,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.info_outline_rounded,
-                        color: AppColors.primaryCyan, size: 22),
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      color: AppColors.primaryCyan,
+                      size: 22,
+                    ),
                     const SizedBox(width: 10),
                     Text(
                       loc.translate('about_app_title'),
@@ -279,7 +301,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const Spacer(),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.primaryCyan.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),

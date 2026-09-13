@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/presentation/providers/drowsiness_detection_provider.dart';
@@ -47,6 +48,8 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = context.loc;
+
     return Consumer<DrowsinessDetectionProvider>(
       builder: (context, provider, _) {
         final alertState = provider.alertState;
@@ -60,27 +63,27 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
         switch (alertState) {
           case DriverAlertState.alarm:
             hudColor = AppColors.alarmRed;
-            statusText = '🚨 خطر: تم اكتشاف نوم أثناء القيادة!';
+            statusText = loc.translate('hud_alarm');
             statusIcon = Icons.warning_rounded;
             break;
           case DriverAlertState.recovering:
             hudColor = AppColors.watchingAmber;
-            statusText = 'جاري تأكيد استيقاظ السائق...';
+            statusText = loc.translate('hud_recovering');
             statusIcon = Icons.visibility_rounded;
             break;
           case DriverAlertState.drowsy:
             hudColor = AppColors.drowsyOrange;
-            statusText = '⚠️ تحذير: علامات نعاس وإجهاد!';
+            statusText = loc.translate('hud_drowsy');
             statusIcon = Icons.error_outline_rounded;
             break;
           case DriverAlertState.watching:
             hudColor = AppColors.watchingAmber;
-            statusText = 'مراقبة حركة العينين...';
+            statusText = loc.translate('hud_watching');
             statusIcon = Icons.remove_red_eye_rounded;
             break;
           case DriverAlertState.normal:
             hudColor = AppColors.normalGreen;
-            statusText = 'السائق مستيقظ ويقظ';
+            statusText = loc.translate('hud_driver_awake');
             statusIcon = Icons.check_circle_outline_rounded;
             break;
         }
@@ -100,7 +103,7 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
                       IconButton(
                         icon: const Icon(Icons.close_fullscreen_rounded, color: Colors.white70, size: 28),
                         onPressed: () => Navigator.of(context).pop(),
-                        tooltip: 'الخروج من وضع HUD',
+                        tooltip: loc.translate('hud_exit_tooltip'),
                       ),
                       Text(
                         _formatTime(_currentTime),
@@ -122,7 +125,7 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
                             _isWindshieldMirrored = !_isWindshieldMirrored;
                           });
                         },
-                        tooltip: 'عكس الشاشة للزجاج الأمامي (Windshield Mirror)',
+                        tooltip: loc.translate('hud_mirror_tooltip'),
                       ),
                     ],
                   ),
@@ -170,8 +173,8 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
                           if (prediction != null)
                             Text(
                               prediction.state == EyeState.closed
-                                  ? 'حالة العين: مغمضة'
-                                  : 'حالة العين: مفتوحة',
+                                  ? loc.translate('hud_eye_closed')
+                                  : loc.translate('hud_eye_open'),
                               style: const TextStyle(
                                 fontSize: 16,
                                 color: Colors.white60,
@@ -196,7 +199,7 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              'مؤشر الإجهاد التراكمي (PERCLOS):',
+                              loc.translate('hud_perclos_label'),
                               style: TextStyle(
                                 fontSize: 13,
                                 color: Colors.white.withValues(alpha: 0.8),

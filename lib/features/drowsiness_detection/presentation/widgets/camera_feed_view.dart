@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 
@@ -30,6 +31,7 @@ class CameraFeedView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = context.loc;
     Color borderColor;
     List<BoxShadow> glow;
 
@@ -127,9 +129,9 @@ class CameraFeedView extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'وضع توفير الطاقة النشط (OLED Saver)',
-                        style: TextStyle(
+                      Text(
+                        loc.translate('power_saver_title'),
+                        style: const TextStyle(
                           color: AppColors.normalGreen,
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -137,7 +139,7 @@ class CameraFeedView extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'معاينة الكاميرا متوقفة لتبريد الهاتف وتوفير البطارية\nالمراقبة بالذكاء الاصطناعي والإنذار يعملان بالخلفية 100%\n(انقر في أي مكان للعودة للمعاينة المباشرة)',
+                        loc.translate('power_saver_desc'),
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.5),
                           fontSize: 11,
@@ -166,15 +168,15 @@ class CameraFeedView extends StatelessWidget {
               ),
             )
           else
-            const Center(
+            Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(color: AppColors.primaryCyan),
-                  SizedBox(height: 16),
+                  const CircularProgressIndicator(color: AppColors.primaryCyan),
+                  const SizedBox(height: 16),
                   Text(
-                    'جاري تجهيز الكاميرا...',
-                    style: TextStyle(color: AppColors.textSecondary),
+                    loc.translate('camera_preparing'),
+                    style: const TextStyle(color: AppColors.textSecondary),
                   ),
                 ],
               ),
@@ -230,8 +232,8 @@ class CameraFeedView extends StatelessWidget {
                             const SizedBox(width: 6),
                             Text(
                               hasDriverFace
-                                  ? 'تم قفل تتبع وجه السائق'
-                                  : 'جاري البحث عن وجه السائق...',
+                                  ? loc.translate('face_locked')
+                                  : loc.translate('face_searching'),
                               style: TextStyle(
                                 color: hasDriverFace
                                     ? AppColors.normalGreen
@@ -298,7 +300,9 @@ class CameraFeedView extends StatelessWidget {
                         ),
                         const SizedBox(width: 5),
                         Text(
-                          isPowerSaverMode ? 'إظهار الكاميرا' : 'توفير الطاقة',
+                          isPowerSaverMode
+                              ? loc.translate('btn_show_camera')
+                              : loc.translate('btn_power_saver'),
                           style: TextStyle(
                             color: isPowerSaverMode
                                 ? AppColors.normalGreen
@@ -328,18 +332,18 @@ class CameraFeedView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppColors.watchingAmber, width: 1),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.nightlight_round,
                       size: 13,
                       color: AppColors.watchingAmber,
                     ),
-                    SizedBox(width: 4),
+                    const SizedBox(width: 4),
                     Text(
-                      'إضاءة خافتة (Low-Light)',
-                      style: TextStyle(
+                      loc.translate('low_light_badge'),
+                      style: const TextStyle(
                         color: AppColors.watchingAmber,
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -405,10 +409,10 @@ class CameraFeedView extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         lastPrediction!.isClosed
-                            ? 'تم غلق العين'
+                            ? loc.translate('eye_closed_badge')
                             : lastPrediction!.isOpen
-                            ? 'تم فتح العين'
-                            : 'جاري فحص العين...',
+                            ? loc.translate('eye_open_badge')
+                            : loc.translate('eye_checking_badge'),
                         style: TextStyle(
                           color: lastPrediction!.isClosed
                               ? AppColors.alarmRed

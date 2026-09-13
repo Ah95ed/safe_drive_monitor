@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 import 'package:safe_drive_monitor/app/theme/app_typography.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/eye_prediction.dart';
 
 class DriverStatusCard extends StatelessWidget {
@@ -21,28 +22,29 @@ class DriverStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = context.loc;
     String eyeStateText;
     Color eyeStateColor;
     IconData eyeIcon;
 
     if (!isMonitoring || prediction == null) {
-      eyeStateText = 'غير نشط';
+      eyeStateText = loc.translate('status_inactive');
       eyeStateColor = AppColors.textMuted;
       eyeIcon = Icons.remove_red_eye_outlined;
     } else {
       switch (prediction!.state) {
         case EyeState.open:
-          eyeStateText = 'العينان مفتوحتان (Open)';
+          eyeStateText = loc.translate('status_eyes_open');
           eyeStateColor = AppColors.normalGreen;
           eyeIcon = Icons.visibility;
           break;
         case EyeState.closed:
-          eyeStateText = 'العينان مغمضتان (Closed)';
+          eyeStateText = loc.translate('status_eyes_closed');
           eyeStateColor = AppColors.alarmRed;
           eyeIcon = Icons.visibility_off;
           break;
         case EyeState.unknown:
-          eyeStateText = 'غير محدد (Unknown)';
+          eyeStateText = loc.translate('status_unknown');
           eyeStateColor = AppColors.watchingAmber;
           eyeIcon = Icons.help_outline;
           break;
@@ -95,7 +97,7 @@ class DriverStatusCard extends StatelessWidget {
                     border: Border.all(color: AppColors.border),
                   ),
                   child: Text(
-                    'الثقة: $confidencePercent%',
+                    '${loc.translate('confidence_label')}: $confidencePercent%',
                     style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -107,7 +109,7 @@ class DriverStatusCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            statusMessage,
+            context.trStatus(statusMessage),
             style: AppTypography.body.copyWith(
               color: isMonitoring ? AppColors.textPrimary : AppColors.textSecondary,
               fontSize: 14,
@@ -120,9 +122,9 @@ class DriverStatusCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'مؤشر الإجهاد التراكمي (PERCLOS): ',
-                      style: TextStyle(
+                    Text(
+                      loc.translate('perclos_label'),
+                      style: const TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
                       ),
@@ -145,9 +147,9 @@ class DriverStatusCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: AppColors.alarmRed, width: 0.8),
                     ),
-                    child: const Text(
-                      '⚠️ انحناء رأس',
-                      style: TextStyle(fontSize: 10, color: AppColors.alarmRed, fontWeight: FontWeight.bold),
+                    child: Text(
+                      loc.translate('head_nod_label'),
+                      style: const TextStyle(fontSize: 10, color: AppColors.alarmRed, fontWeight: FontWeight.bold),
                     ),
                   ),
               ],

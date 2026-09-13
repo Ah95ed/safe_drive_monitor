@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:safe_drive_monitor/app/theme/app_colors.dart';
 import 'package:safe_drive_monitor/app/theme/app_typography.dart';
+import 'package:safe_drive_monitor/core/localization/app_localizations.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_alert_state.dart';
 
 class AlertBannerOverlay extends StatefulWidget {
@@ -43,6 +44,8 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
 
   @override
   Widget build(BuildContext context) {
+    final loc = context.loc;
+
     if (!widget.isMonitoring) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -51,14 +54,14 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.border),
         ),
-        child: const Row(
+        child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.pause_circle_outline, color: AppColors.textSecondary),
-            SizedBox(width: 8),
+            const Icon(Icons.pause_circle_outline, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
             Text(
-              'المراقبة متوقفة',
-              style: TextStyle(
+              loc.translate('monitoring_stopped'),
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textSecondary,
@@ -87,7 +90,7 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
                 ),
               ],
             ),
-            child: const Column(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 FittedBox(
@@ -95,20 +98,20 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.warning_rounded, color: Colors.white, size: 30),
-                      SizedBox(width: 8),
-                      Text('🚨 WAKE UP!', style: AppTypography.heroAlert),
-                      SizedBox(width: 8),
-                      Icon(Icons.warning_rounded, color: Colors.white, size: 30),
+                      const Icon(Icons.warning_rounded, color: Colors.white, size: 30),
+                      const SizedBox(width: 8),
+                      Text(loc.translate('alert_banner_wake_up'), style: AppTypography.heroAlert),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.warning_rounded, color: Colors.white, size: 30),
                     ],
                   ),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
-                    'استيقظ فوراً! العينان مغمضتان!',
-                    style: TextStyle(
+                    loc.translate('alert_banner_wake_up_sub'),
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -135,14 +138,14 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
               ),
             ],
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.visibility_rounded, color: Colors.black87, size: 24),
-              SizedBox(width: 8),
+              const Icon(Icons.visibility_rounded, color: Colors.black87, size: 24),
+              const SizedBox(width: 8),
               Text(
-                'جاري تأكيد استيقاظ السائق...',
-                style: TextStyle(
+                loc.translate('alert_banner_recovering'),
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.black,
@@ -167,14 +170,14 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
               ),
             ],
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
-              SizedBox(width: 8),
+              const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+              const SizedBox(width: 8),
               Text(
-                '⚠️ تحذير: علامات نعاس!',
-                style: TextStyle(
+                loc.translate('alert_banner_drowsy'),
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
                   color: Colors.white,
@@ -192,14 +195,14 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
             color: AppColors.watchingAmber.withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.visibility_off, color: Colors.black87, size: 22),
-              SizedBox(width: 8),
+              const Icon(Icons.visibility_off, color: Colors.black87, size: 22),
+              const SizedBox(width: 8),
               Text(
-                'مراقبة إغلاق العينين...',
-                style: TextStyle(
+                loc.translate('alert_banner_watching'),
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.black,
@@ -218,15 +221,15 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.normalGreen),
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.check_circle_rounded,
+              const Icon(Icons.check_circle_rounded,
                   color: AppColors.normalGreen, size: 22),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               Text(
-                '● السائق متيقظ (Awake) - القيادة آمنة',
-                style: TextStyle(
+                loc.translate('alert_banner_normal'),
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: AppColors.normalGreen,

@@ -31,32 +31,33 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
   }
 
   void _showBatteryExemptionDialog(BuildContext context, DrowsinessDetectionProvider provider) {
+    final loc = context.loc;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.battery_alert_rounded, color: AppColors.watchingAmber),
-            SizedBox(width: 8),
-            Text('استثناء قيود البطارية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Icon(Icons.battery_alert_rounded, color: AppColors.watchingAmber),
+            const SizedBox(width: 8),
+            Text(loc.translate('battery_dialog_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: const Text(
-          'Safe Drive Monitor يحتاج إلى استمرار المراقبة أثناء الرحلة.\n\nقد تقوم قيود البطارية في Android بإيقاف الكاميرا أو المعالجة في الخلفية.\n\nلرفع موثوقية مراقبة السائق، يمكنك السماح للتطبيق بالعمل دون قيود البطارية أثناء جلسات القيادة.',
-          style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary),
+        content: Text(
+          loc.translate('battery_dialog_body'),
+          style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('لاحقاً (LATER)', style: TextStyle(color: AppColors.textSecondary)),
+            child: Text(loc.translate('dialog_later'), style: const TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () async {
               Navigator.of(ctx).pop();
               await provider.openBatterySettings();
             },
-            child: const Text('إعدادات الجهاز (OEM)', style: TextStyle(color: AppColors.primaryCyan)),
+            child: Text(loc.translate('dialog_oem_settings'), style: const TextStyle(color: AppColors.primaryCyan)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.watchingAmber),
@@ -64,7 +65,7 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
               Navigator.of(ctx).pop();
               await provider.requestIgnoreBatteryOptimizations();
             },
-            child: const Text('سماح (ALLOW)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            child: Text(loc.translate('dialog_allow'), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -168,10 +169,10 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                         size: 22,
                                       ),
                                       const SizedBox(width: 8),
-                                      const Expanded(
+                                      Expanded(
                                         child: Text(
-                                          'لرفع موثوقية المراقبة بالخلفية، يمكنك استثناء التطبيق من قيود البطارية.',
-                                          style: TextStyle(
+                                          context.tr('battery_banner_text'),
+                                          style: const TextStyle(
                                             fontSize: 11,
                                             color: AppColors.textPrimary,
                                             fontWeight: FontWeight.w600,
@@ -189,9 +190,9 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                         ),
-                                        child: const Text(
-                                          'تفاصيل',
-                                          style: TextStyle(
+                                        child: Text(
+                                          context.tr('battery_banner_details'),
+                                          style: const TextStyle(
                                             color: AppColors.watchingAmber,
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
@@ -238,7 +239,7 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          provider.modelState.arabicLabel,
+                                          context.trStatus(provider.modelState.arabicLabel),
                                           style: TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
@@ -252,9 +253,9 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                         TextButton.icon(
                                           onPressed: () => provider.retryModelBootstrap(),
                                           icon: const Icon(Icons.refresh, size: 16, color: AppColors.primaryCyan),
-                                          label: const Text(
-                                            'إعادة المحاولة',
-                                            style: TextStyle(
+                                          label: Text(
+                                            context.tr('retry'),
+                                            style: const TextStyle(
                                               color: AppColors.primaryCyan,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 12,
@@ -295,7 +296,7 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          '${provider.monitoringHealth.arabicLabel}: ${provider.monitoringIssue.arabicDescription}',
+                                          '${context.trStatus(provider.monitoringHealth.arabicLabel)}: ${context.trStatus(provider.monitoringIssue.arabicDescription)}',
                                           style: TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
@@ -331,7 +332,7 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          'حماية حرارية: تم تخفيض الحمل غير الأساسي لتبريد الجهاز (${provider.thermalState.arabicLabel})',
+                                          '${context.tr('thermal_protection_prefix')} (${context.trStatus(provider.thermalState.arabicLabel)})',
                                           style: const TextStyle(
                                             fontSize: 11,
                                             color: AppColors.textPrimary,
