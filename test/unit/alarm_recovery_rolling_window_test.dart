@@ -259,6 +259,7 @@ class FakeEyeStateClassifier implements EyeStateClassifier {
     int sensorRotation = 0,
     bool isMirrored = false,
     Rect? dynamicRoi,
+    bool applyGammaCorrection = false,
   }) async {
     return EyePrediction.unknown(timestamp: DateTime.now());
   }

@@ -45,6 +45,7 @@ class LightingManager {
   double _smoothedLuminance = 128.0;
   LightingState _lightingState = LightingState.good;
   DateTime _lastAdaptationTime = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime? _criticalDarknessStartTime;
   double _screenIlluminationOpacity = 0.0;
   int _consecutiveCriticalFrames = 0;
 
@@ -67,11 +68,12 @@ class LightingManager {
     _lightingState = LightingState.good;
     _screenIlluminationOpacity = 0.0;
     _consecutiveCriticalFrames = 0;
+    _criticalDarknessStartTime = null;
     _lastAdaptationTime = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   /// Calculates fast sub-sampled average luminance from the camera Y plane (0..255).
-  LightingState processCameraImage(CameraImage image) {
+  LightingState processCameraImage(CameraImage image, [DateTime? timestamp]) {
     if (image.planes.isEmpty) return _lightingState;
 
     final Plane yPlane = image.planes[0];
@@ -102,17 +104,27 @@ class LightingManager {
     _smoothedLuminance =
         (_smoothedLuminance * (1.0 - smoothingFactor)) + (instantLum * smoothingFactor);
 
+    final now = timestamp ?? DateTime.now();
+
     if (_smoothedLuminance < criticalLightThreshold) {
-      _lightingState = LightingState.critical;
+      _criticalDarknessStartTime ??= now;
+      if (now.difference(_criticalDarknessStartTime!) >= const Duration(seconds: 3)) {
+        _lightingState = LightingState.critical;
+      } else {
+        _lightingState = LightingState.low;
+      }
       _consecutiveCriticalFrames++;
-    } else if (_smoothedLuminance < lowLightThreshold) {
-      _lightingState = LightingState.low;
-      _consecutiveCriticalFrames = 0;
-      _screenIlluminationOpacity = 0.0;
     } else {
-      _lightingState = LightingState.good;
-      _consecutiveCriticalFrames = 0;
-      _screenIlluminationOpacity = 0.0;
+      _criticalDarknessStartTime = null;
+      if (_smoothedLuminance < lowLightThreshold) {
+        _lightingState = LightingState.low;
+        _consecutiveCriticalFrames = 0;
+        _screenIlluminationOpacity = 0.0;
+      } else {
+        _lightingState = LightingState.good;
+        _consecutiveCriticalFrames = 0;
+        _screenIlluminationOpacity = 0.0;
+      }
     }
 
     // Dynamic screen illumination fallback for critical darkness (stepped safely: 5% -> 10% -> 15% max)

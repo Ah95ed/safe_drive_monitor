@@ -30,7 +30,7 @@ class AppConstants {
 
   /// Lighting analysis thresholds on Y-plane (0..255)
   static const double lowLightThreshold = 40.0;
-  static const double criticalDarknessThreshold = 18.0;
+  static const double criticalDarknessThreshold = 15.0;
 
   /// Disclaimer displayed to driver on startup.
   static const String safetyDisclaimerText =

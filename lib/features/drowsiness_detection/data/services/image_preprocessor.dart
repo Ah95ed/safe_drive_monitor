@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
@@ -19,6 +20,7 @@ Float32List yuvRoiToNormalizedFloat32({
   required bool isMirrored,
   required ModelInputNormalization normalization,
   TensorChannelLayout layout = TensorChannelLayout.interleavedRgb,
+  bool applyGammaCorrection = false,
   Float32List? destinationBuffer,
 }) {
   final buffer =
@@ -79,6 +81,7 @@ Float32List yuvRoiToNormalizedFloat32({
       isMirrored: isMirrored,
       isPlanar: layout == TensorChannelLayout.planarRgb,
       normalization: normalization,
+      applyGammaCorrection: applyGammaCorrection,
     );
   } else {
     throw ImageConversionException(
@@ -133,6 +136,7 @@ class ImagePreprocessor {
     int sensorRotation = 0,
     bool isMirrored = false,
     Rect? dynamicRoi,
+    bool applyGammaCorrection = false,
   }) {
     try {
       if (useDirectFastPipeline) {
@@ -142,6 +146,7 @@ class ImagePreprocessor {
           isMirrored: isMirrored,
           dynamicRoi: dynamicRoi,
           layout: channelLayout,
+          applyGammaCorrection: applyGammaCorrection,
         );
       } else {
         return preprocessCameraImageLegacy(
@@ -166,6 +171,7 @@ class ImagePreprocessor {
     Rect? dynamicRoi,
     TensorChannelLayout? layout,
     Float32List? destinationBuffer,
+    bool applyGammaCorrection = false,
   }) {
     final activeLayout = layout ?? channelLayout;
     final buffer = destinationBuffer ?? _inputBuffer;
@@ -222,9 +228,18 @@ class ImagePreprocessor {
       isMirrored: isMirrored,
       normalization: normalization,
       layout: activeLayout,
+      applyGammaCorrection: applyGammaCorrection,
       destinationBuffer: buffer,
     );
   }
+
+  /// Precomputed gamma LUT (gamma = 0.75) for lifting shadows in low-light conditions without overhead.
+  static final Uint8List gammaLut = Uint8List.fromList(
+    List.generate(
+      256,
+      (i) => (255.0 * math.pow(i / 255.0, 0.75)).round().clamp(0, 255),
+    ),
+  );
 
   static void sampleYuvDirect(
     CameraImage cameraImage,
@@ -242,6 +257,7 @@ class ImagePreprocessor {
     required bool isMirrored,
     required bool isPlanar,
     required ModelInputNormalization normalization,
+    bool applyGammaCorrection = false,
   }) {
     if (cameraImage.planes.isEmpty) {
       throw const ImageConversionException('YUV image has no planes');
@@ -327,7 +343,8 @@ class ImagePreprocessor {
         final int uvX = srcX >> 1;
         final int uvY = srcY >> 1;
 
-        final int yVal = yBytes[yIndex];
+        final int rawY = yBytes[yIndex];
+        final int yVal = applyGammaCorrection ? gammaLut[rawY] : rawY;
         final int uVal;
         final int vVal;
 

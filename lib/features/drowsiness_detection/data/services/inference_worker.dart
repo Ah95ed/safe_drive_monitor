@@ -239,6 +239,7 @@ class IsolateEyeStateClassifier implements EyeStateClassifier {
     int sensorRotation = 0,
     bool isMirrored = false,
     Rect? dynamicRoi,
+    bool applyGammaCorrection = false,
   }) async {
     if (!isReady) {
       throw const ModelLoadException('Inference worker is not initialized');
@@ -249,6 +250,7 @@ class IsolateEyeStateClassifier implements EyeStateClassifier {
       sensorRotation: sensorRotation,
       isMirrored: isMirrored,
       dynamicRoi: dynamicRoi,
+      applyGammaCorrection: applyGammaCorrection,
     );
 
     return classifyFloat32(inputTensor);

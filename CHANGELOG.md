@@ -4,6 +4,12 @@ All notable behavioral and structural changes to this project will be documented
 
 ## [Unreleased]
 
+### Phase 4 — Real-World Driving Robustness & Degraded States (feat(driving))
+- **Precomputed Gamma LUT Shadow Lifting**: Integrated precomputed 256-entry gamma lookup table (gamma = 0.75) within `ImagePreprocessor.gammaLut`. Activates seamlessly in `yuvRoiToNormalizedFloat32` when `isLowLight` is detected without runtime `math.pow()` overhead.
+- **Critical Ambient Darkness Safety Rule**: Updated `LightingManager` to require 3 consecutive seconds below critical darkness threshold (luminance < 15) before declaring `DriverAlertState.insufficientLight`, preventing transient shadow flickers from triggering degraded state alarms.
+- **Level 1 AMOLED Driving Mode**: Set power saver mode active by default at session start (`#000000` screen, CameraPreview unmounted to eliminate GPU rendering and cool the device). Added `wakeTemporaryHud()` 5-second touch-wake HUD timer, automatically overridden to alert HUD instantly on drowsiness alarm.
+- **High-Contrast Degraded Safety Cards**: Configured dedicated high-contrast warning messages across `DrivingHudScreen` and `AlertBannerOverlay` for all degraded states (`noFaceDetected`, `insufficientLight`, `monitoringStalled`, `thermalThrottled`) with distinct technical audio warning sounds.
+
 ### Phase 3 — Pipeline Performance & Dedicated Isolate (perf(pipeline))
 - **Zero-Copy Single-Pass ROI Extraction (`yuvRoiToNormalizedFloat32`)**: Implemented direct single-pass pixel reading and fixed-point YUV->RGB conversion sampling exclusively within the target ROI. Eliminates full-frame allocations and reduces preprocessing latency to < 8ms. Fully supports triplanar YUV420_888, biplanar NV12/NV21, single-plane NV21, and iOS BGRA8888 with specific `ImageConversionException` error handling.
 - **Dedicated Long-Lived Inference Isolate (`IsolateEyeStateClassifier`)**: Spawns a dedicated background isolate worker at session initialization. Transfers preprocessed tensor data across isolate boundary via zero-copy `TransferableTypedData`. Initializes TFLite interpreter with `threads = 2`, `useNnApiForAndroid = false`, and `XNNPackDelegate` fallback to guarantee 0 UI jank.

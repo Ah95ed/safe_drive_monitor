@@ -60,6 +60,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   bool _isProcessingFrame = false;
   bool _isDetectingFace = false;
   bool _isPowerSaverMode = false;
+  bool _isTemporaryHudVisible = false;
+  Timer? _temporaryHudTimer;
   bool _isIgnoringBatteryOptimizations = false;
   bool _stopping = false;
   Object? _error;
@@ -334,6 +336,23 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   double get screenIlluminationOpacity =>
       _lightingManager.screenIlluminationOpacity;
 
+  bool get isTemporaryHudVisible => _isTemporaryHudVisible;
+
+  /// Temporarily awakens HUD/camera preview on user tap for [duration] before re-engaging black OLED driving mode.
+  void wakeTemporaryHud({Duration duration = const Duration(seconds: 5)}) {
+    _temporaryHudTimer?.cancel();
+    _isTemporaryHudVisible = true;
+    AppLogger.info(_tag, 'Temporary HUD awakened for ${duration.inSeconds}s');
+    notifyListeners();
+    _temporaryHudTimer = Timer(duration, () {
+      if (!_disposed) {
+        _isTemporaryHudVisible = false;
+        AppLogger.info(_tag, 'Temporary HUD timeout expired. Re-engaging OLED Driving Mode.');
+        notifyListeners();
+      }
+    });
+  }
+
   void togglePowerSaverMode() {
     _isPowerSaverMode = !_isPowerSaverMode;
     AppLogger.info(_tag, 'Power Saver Mode toggled: $_isPowerSaverMode');
@@ -487,6 +506,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       _lastLifecycleTransitionAt = null;
       _backgroundDetectionArmed = true;
       _freshPredictionsAfterTransition = 0;
+      _isPowerSaverMode = true; // Level 1 Driving Mode is default
+      _isTemporaryHudVisible = false;
+      _temporaryHudTimer?.cancel();
       _drowsinessAnalyzer.reset();
       _faceTracker.reset();
       _lightingManager.reset();
@@ -618,6 +640,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       _lastLifecycleTransitionAt = null;
       _faceLostSince = null;
       _lastFaceLostWarningAt = null;
+      _temporaryHudTimer?.cancel();
+      _isTemporaryHudVisible = false;
       _backgroundDetectionArmed = true;
       _freshPredictionsAfterTransition = 0;
       _drowsinessAnalyzer.reset();
@@ -961,6 +985,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
         sensorRotation:
             (_cameraService.sensorOrientation + _rotationOffset) % 360,
         dynamicRoi: dynamicRoi,
+        applyGammaCorrection: _lightingManager.isLowLight,
       );
 
       if (_disposed || !_isMonitoring) return;

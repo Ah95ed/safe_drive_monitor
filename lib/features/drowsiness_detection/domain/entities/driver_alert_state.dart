@@ -40,6 +40,21 @@ extension DriverAlertStateX on DriverAlertState {
       this == DriverAlertState.monitoringStalled ||
       this == DriverAlertState.thermalThrottled;
 
+  String get warningMessage {
+    switch (this) {
+      case DriverAlertState.noFaceDetected:
+        return 'وجه السائق غير ظاهر — اضبط موضع الهاتف';
+      case DriverAlertState.insufficientLight:
+        return 'الإضاءة منخفضة جداً — شغل إضاءة المقصورة';
+      case DriverAlertState.monitoringStalled:
+        return 'توقف تحليل الكاميرا — أعد تشغيل التطبيق';
+      case DriverAlertState.thermalThrottled:
+        return 'حرارة الجهاز مرتفعة — تم تقليل معدل المعالجة';
+      default:
+        return arabicLabel;
+    }
+  }
+
   String get arabicLabel {
     switch (this) {
       case DriverAlertState.normal:

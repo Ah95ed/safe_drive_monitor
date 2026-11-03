@@ -38,6 +38,7 @@ abstract class EyeStateClassifier {
     int sensorRotation = 0,
     bool isMirrored = false,
     Rect? dynamicRoi,
+    bool applyGammaCorrection = false,
   });
   Future<EyePrediction> classifyFloat32(Float32List inputBuffer);
   bool get isReady;
@@ -215,6 +216,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     int sensorRotation = 0,
     bool isMirrored = false,
     Rect? dynamicRoi,
+    bool applyGammaCorrection = false,
   }) async {
     if (_interpreter == null) {
       throw const ModelLoadException('Model interpreter is not initialized');
@@ -225,6 +227,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       sensorRotation: sensorRotation,
       isMirrored: isMirrored,
       dynamicRoi: dynamicRoi,
+      applyGammaCorrection: applyGammaCorrection,
     );
 
     return classifyFloat32(inputTensor);

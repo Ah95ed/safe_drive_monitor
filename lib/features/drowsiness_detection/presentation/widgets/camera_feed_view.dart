@@ -12,6 +12,8 @@ class CameraFeedView extends StatelessWidget {
   final bool hasDriverFace;
   final bool isLowLight;
   final bool isPowerSaverMode;
+  final bool isTemporaryHudVisible;
+  final VoidCallback? onWakeTemporaryHud;
   final VoidCallback? onTogglePowerSaver;
   final DriverAlertState alertState;
   final EyePrediction? lastPrediction;
@@ -24,6 +26,8 @@ class CameraFeedView extends StatelessWidget {
     this.hasDriverFace = false,
     this.isLowLight = false,
     this.isPowerSaverMode = false,
+    this.isTemporaryHudVisible = false,
+    this.onWakeTemporaryHud,
     this.onTogglePowerSaver,
     required this.alertState,
     this.lastPrediction,
@@ -123,49 +127,47 @@ class CameraFeedView extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (isPowerSaverMode && !alertState.isAlarm)
+          if (isPowerSaverMode && !alertState.isAlarm && !isTemporaryHudVisible)
             // Deep OLED / AMOLED Black Screen - CameraPreview unmounted!
             // Consumes 0W on black pixels, stops GPU OpenGL texture render & cools phone!
             GestureDetector(
-              onTap: onTogglePowerSaver,
+              onTap: onWakeTemporaryHud ?? onTogglePowerSaver,
               child: Container(
-                color: Colors.black,
+                color: const Color(0xFF000000),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        width: 16,
+                        height: 16,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: AppColors.normalGreen.withValues(alpha: 0.15),
-                          border: Border.all(
-                            color: AppColors.normalGreen.withValues(alpha: 0.4),
-                            width: 1.5,
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.energy_savings_leaf_rounded,
                           color: AppColors.normalGreen,
-                          size: 36,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.normalGreen.withValues(alpha: 0.6),
+                              blurRadius: 12,
+                              spreadRadius: 4,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
                       Text(
                         loc.translate('power_saver_title'),
                         style: const TextStyle(
                           color: AppColors.normalGreen,
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        loc.translate('power_saver_desc'),
+                        'المراقبة نشطة — المس الشاشة لعرض الحالة',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
+                          color: Colors.white.withValues(alpha: 0.45),
                           fontSize: 11,
-                          height: 1.4,
                         ),
                         textAlign: TextAlign.center,
                       ),

@@ -231,7 +231,7 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  widget.alertState.arabicLabel,
+                  widget.alertState.warningMessage,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 15,

@@ -361,7 +361,11 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                   hasDriverFace: provider.hasValidDriverFace,
                                   isLowLight: provider.isLowLight,
                                   isPowerSaverMode: provider.isPowerSaverMode,
-                                  onTogglePowerSaver: provider.togglePowerSaverMode,
+                                  isTemporaryHudVisible:
+                                      provider.isTemporaryHudVisible,
+                                  onWakeTemporaryHud: provider.wakeTemporaryHud,
+                                  onTogglePowerSaver:
+                                      provider.togglePowerSaverMode,
                                   alertState: provider.alertState,
                                   lastPrediction: provider.lastPrediction,
                                 ),
