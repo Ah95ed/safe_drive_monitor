@@ -47,7 +47,7 @@ jobs:
 
       - name: Build Split APKs
         run: >-
-          flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
+          flutter build apk --release --split-per-abi
           # --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
           # --dart-define=GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID }}
           # --dart-define=GOOGLE_DESKTOP_CLIENT_ID=${{ secrets.GOOGLE_DESKTOP_CLIENT_ID }}
