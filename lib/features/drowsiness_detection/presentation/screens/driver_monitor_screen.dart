@@ -384,10 +384,22 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                                 isMonitoring: provider.isMonitoring,
                                 isEnabled: provider.isModelReady && provider.isInitialized,
                                 onPressed: (provider.isModelReady && provider.isInitialized)
-                                    ? () {
+                                    ? () async {
                                         if (provider.isMonitoring) {
                                           provider.stopMonitoring();
                                         } else {
+                                          final messenger = ScaffoldMessenger.of(context);
+                                          final isAudioReady = await provider.checkAudioReadiness();
+                                          if (!mounted) return;
+                                          if (!isAudioReady) {
+                                            messenger.showSnackBar(
+                                              const SnackBar(
+                                                content: Text('⚠️ مستوى صوت المنبه منخفض! يُرجى رفعه لضمان سماع الإنذار.'),
+                                                backgroundColor: AppColors.watchingAmber,
+                                                duration: Duration(seconds: 4),
+                                              ),
+                                            );
+                                          }
                                           provider.startMonitoring();
                                         }
                                       }

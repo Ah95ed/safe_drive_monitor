@@ -89,6 +89,17 @@ class MainActivity : FlutterActivity() {
                         result.error("SECURITY_CHECK_ERROR", e.message, null)
                     }
                 }
+                "getAlarmVolume" -> {
+                    val audioManager = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                    if (audioManager != null) {
+                        val current = audioManager.getStreamVolume(android.media.AudioManager.STREAM_ALARM)
+                        val max = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM)
+                        val ratio = if (max > 0) current.toDouble() / max.toDouble() else 1.0
+                        result.success(ratio)
+                    } else {
+                        result.success(1.0)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

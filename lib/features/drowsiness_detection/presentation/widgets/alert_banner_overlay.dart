@@ -212,6 +212,38 @@ class _AlertBannerOverlayState extends State<AlertBannerOverlay>
           ),
         );
 
+      case DriverAlertState.noFaceDetected:
+      case DriverAlertState.insufficientLight:
+      case DriverAlertState.monitoringStalled:
+      case DriverAlertState.thermalThrottled:
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.watchingAmber.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.alarmRed, width: 1.5),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.black87, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  widget.alertState.arabicLabel,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+
       case DriverAlertState.normal:
         return Container(
           width: double.infinity,

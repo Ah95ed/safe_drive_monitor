@@ -479,6 +479,9 @@ class MockAudioAlarmService implements AudioAlarmService {
   Future<void> playTechnicalWarning() async {}
 
   @override
+  Future<double> getAlarmVolumeLevel() async => 1.0;
+
+  @override
   Future<void> dispose() async {
     _playing = false;
   }

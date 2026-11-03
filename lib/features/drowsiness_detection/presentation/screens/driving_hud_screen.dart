@@ -81,6 +81,26 @@ class _DrivingHudScreenState extends State<DrivingHudScreen> {
             statusText = loc.translate('hud_watching');
             statusIcon = Icons.remove_red_eye_rounded;
             break;
+          case DriverAlertState.noFaceDetected:
+            hudColor = AppColors.watchingAmber;
+            statusText = alertState.arabicLabel;
+            statusIcon = Icons.face_retouching_off_rounded;
+            break;
+          case DriverAlertState.insufficientLight:
+            hudColor = AppColors.watchingAmber;
+            statusText = alertState.arabicLabel;
+            statusIcon = Icons.brightness_low_rounded;
+            break;
+          case DriverAlertState.monitoringStalled:
+            hudColor = AppColors.alarmRed;
+            statusText = alertState.arabicLabel;
+            statusIcon = Icons.pause_circle_filled_rounded;
+            break;
+          case DriverAlertState.thermalThrottled:
+            hudColor = AppColors.watchingAmber;
+            statusText = alertState.arabicLabel;
+            statusIcon = Icons.thermostat_rounded;
+            break;
           case DriverAlertState.normal:
             hudColor = AppColors.normalGreen;
             statusText = loc.translate('hud_driver_awake');

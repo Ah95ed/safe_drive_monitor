@@ -38,6 +38,9 @@ class FakeAudioAlarmService implements AudioAlarmService {
   }
 
   @override
+  Future<double> getAlarmVolumeLevel() async => 1.0;
+
+  @override
   Future<void> dispose() async {
     _playing = false;
   }

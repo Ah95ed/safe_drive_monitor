@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
@@ -7,11 +8,15 @@ abstract class AudioAlarmService {
   Future<void> playTechnicalWarning();
   Future<void> stopAlarm();
   Future<void> dispose();
+  Future<double> getAlarmVolumeLevel();
   bool get isPlaying;
 }
 
 class AppAudioAlarmService implements AudioAlarmService {
   static const String _tag = 'AudioAlarmService';
+  static const MethodChannel _nativeChannel =
+      MethodChannel('com.eyewatchdriver.eye.safe_drive_monitor/foreground_service');
+
   final AudioPlayer _player;
   bool _isPlaying = false;
   bool _contextConfigured = false;
@@ -25,6 +30,17 @@ class AppAudioAlarmService implements AudioAlarmService {
   @override
   bool get isPlaying => _isPlaying;
 
+  @override
+  Future<double> getAlarmVolumeLevel() async {
+    try {
+      final volume = await _nativeChannel.invokeMethod<double>('getAlarmVolume');
+      return volume ?? 1.0;
+    } catch (e) {
+      AppLogger.warning(_tag, 'Could not read alarm volume: $e');
+      return 1.0;
+    }
+  }
+
   Future<void> _configureAudioContext() async {
     if (_contextConfigured) return;
     try {
@@ -35,13 +51,12 @@ class AppAudioAlarmService implements AudioAlarmService {
             stayAwake: true,
             contentType: AndroidContentType.sonification,
             usageType: AndroidUsageType.alarm,
-            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+            audioFocus: AndroidAudioFocus.gainTransientExclusive,
           ),
           iOS: AudioContextIOS(
             category: AVAudioSessionCategory.playback,
             options: {
               AVAudioSessionOptions.duckOthers,
-              AVAudioSessionOptions.defaultToSpeaker,
             },
           ),
         ),

@@ -30,6 +30,7 @@ import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services
 
 import 'package:safe_drive_monitor/core/services/thermal_manager_service.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/services/adaptive_inference_scheduler.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class DrowsinessDetectionProvider extends ChangeNotifier
     with WidgetsBindingObserver {
@@ -517,6 +518,13 @@ class DrowsinessDetectionProvider extends ChangeNotifier
         wakeLockActive: true,
       );
 
+      // Acquire screen WakeLock to prevent OS display sleep
+      try {
+        await WakelockPlus.enable();
+      } catch (e) {
+        AppLogger.warning(_tag, 'Wakelock enable warning: $e');
+      }
+
       // 4. Start Camera Image Stream
       await _cameraService.startImageStream(_handleCameraFrame);
 
@@ -591,11 +599,16 @@ class DrowsinessDetectionProvider extends ChangeNotifier
         AppLogger.warning(_tag, 'HapticService stop error: $e');
       }
 
-      // 5. Stop foreground service and remove notification
+      // 5. Stop foreground service, disable wakelock and remove notification
       try {
         await _foregroundService.stopForegroundService();
       } catch (e) {
         AppLogger.warning(_tag, 'ForegroundService stop error: $e');
+      }
+      try {
+        await WakelockPlus.disable();
+      } catch (e) {
+        AppLogger.warning(_tag, 'Wakelock disable warning: $e');
       }
 
       // 6. Reset analyzers, trackers, scheduler, lighting
@@ -618,8 +631,16 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       AppLogger.error(_tag, 'Fatal error during hardStopAll', e, st);
     } finally {
       _stopping = false;
-      notifyListeners();
+      if (!_disposed) {
+        notifyListeners();
+      }
     }
+  }
+
+  /// Validates that alarm stream volume is sufficiently high before session start.
+  Future<bool> checkAudioReadiness() async {
+    final vol = await _audioAlarmService.getAlarmVolumeLevel();
+    return vol >= 0.25;
   }
 
   /// Stop monitoring alias delegating to hardStopAll().
@@ -646,6 +667,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     } else if (health == MonitoringHealth.failed) {
       // Phase 14 & 15: Failed after exhausting recovery attempts - trigger distinct technical warning
       _statusMessage = 'تنبيه عطل فني: ${issue.arabicDescription}';
+      if (issue == MonitoringIssue.cameraStalled || issue == MonitoringIssue.inferenceStalled) {
+        _alertState = DriverAlertState.monitoringStalled;
+      }
       _audioAlarmService.playTechnicalWarning();
       _hapticService.playWarningHaptic();
       _foregroundService.updateNotificationStatus(
@@ -655,7 +679,15 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     } else if (health == MonitoringHealth.degraded) {
       _statusMessage = 'انخفاض كفاءة: ${issue.arabicDescription}';
       if (issue == MonitoringIssue.insufficientLight) {
+        _alertState = DriverAlertState.insufficientLight;
+        _audioAlarmService.playTechnicalWarning();
         _hapticService.playWarningHaptic();
+      } else if (issue == MonitoringIssue.noDriverFace) {
+        _alertState = DriverAlertState.noFaceDetected;
+        _audioAlarmService.playTechnicalWarning();
+      } else if (issue == MonitoringIssue.thermalThrottling) {
+        _alertState = DriverAlertState.thermalThrottled;
+        _audioAlarmService.playTechnicalWarning();
       }
       _foregroundService.updateNotificationStatus(
         'انخفاض كفاءة: ${issue.arabicDescription}',
@@ -1298,6 +1330,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     } catch (_) {}
     try {
       await _hapticService.dispose();
+    } catch (_) {}
+    try {
+      await WakelockPlus.disable();
     } catch (_) {}
     _isInitialized = false;
   }
