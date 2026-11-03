@@ -52,6 +52,7 @@ class DrowsinessAnalyzer {
   bool _isAlarmPlaying = false;
 
   final List<TimedEyePrediction> _recoveryWindow = [];
+  final List<EyePrediction> _temporalVotingBuffer = [];
   double _emaOpenConfidence = 0.0;
 
   DrowsinessAnalyzer({
@@ -81,6 +82,7 @@ class DrowsinessAnalyzer {
     _openStartedAt = null;
     _isAlarmPlaying = false;
     _recoveryWindow.clear();
+    _temporalVotingBuffer.clear();
     _emaOpenConfidence = 0.0;
     _perclosCalculator.reset();
   }
@@ -91,6 +93,7 @@ class DrowsinessAnalyzer {
     _closedStartedAt = null;
     _openStartedAt = null;
     _recoveryWindow.clear();
+    _temporalVotingBuffer.clear();
     _emaOpenConfidence = 0.0;
     // If not in confirmed alarm, reset alert state back to normal
     if (_currentState != DriverAlertState.alarm) {
@@ -138,6 +141,7 @@ class DrowsinessAnalyzer {
     if (!hasDriverFace) {
       _closedStartedAt = null;
       _openStartedAt = null;
+      _temporalVotingBuffer.clear();
       final wasAlarm = _currentState == DriverAlertState.alarm ||
           _currentState == DriverAlertState.recovering ||
           _isAlarmPlaying;
@@ -155,6 +159,12 @@ class DrowsinessAnalyzer {
         closedRatio: closedRatio,
         unknownRatio: unknownRatio,
       );
+    }
+
+    // Update temporal voting buffer (last 3 predictions)
+    _temporalVotingBuffer.add(prediction);
+    if (_temporalVotingBuffer.length > 3) {
+      _temporalVotingBuffer.removeAt(0);
     }
 
     // Check head nod (pitch < threshold)
@@ -356,10 +366,15 @@ class DrowsinessAnalyzer {
       _closedStartedAt ??= currentNow;
       final closedDuration = currentNow.difference(_closedStartedAt!);
 
+      // Temporal voting: require majority closed in the last 3 predictions before state escalation
+      final validVoting = _temporalVotingBuffer.where((p) => !p.isUnknown).toList();
+      final int closedVotes = validVoting.where((p) => p.state == EyeState.closed && p.confidence >= config.minimumClosedConfidence).length;
+      final bool majorityClosed = validVoting.isEmpty || (validVoting.length < 3 ? closedVotes >= 1 : closedVotes >= 2);
+
       final bool isProlongedClosed = closedDuration >= config.alarmThreshold;
       final bool isNodWithClosed = isHeadNodding && closedDuration >= config.watchingThreshold;
 
-      if (isProlongedClosed || isNodWithClosed) {
+      if ((isProlongedClosed || isNodWithClosed) && majorityClosed) {
         _currentState = DriverAlertState.alarm;
         _isAlarmPlaying = true;
 
@@ -380,7 +395,7 @@ class DrowsinessAnalyzer {
           unknownRatio: unknownRatio,
           emaOpenConfidence: _emaOpenConfidence,
         );
-      } else if (closedDuration >= config.drowsyThreshold || _perclosCalculator.isWarningLevel) {
+      } else if ((closedDuration >= config.drowsyThreshold || _perclosCalculator.isWarningLevel) && majorityClosed) {
         _currentState = DriverAlertState.drowsy;
         return _buildResult(
           continuousClosed: closedDuration,
@@ -395,7 +410,7 @@ class DrowsinessAnalyzer {
           unknownRatio: unknownRatio,
           emaOpenConfidence: _emaOpenConfidence,
         );
-      } else if (closedDuration >= config.watchingThreshold) {
+      } else if (closedDuration >= config.watchingThreshold && majorityClosed) {
         _currentState = DriverAlertState.watching;
         return _buildResult(
           continuousClosed: closedDuration,

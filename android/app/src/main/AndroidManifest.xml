@@ -45,11 +45,6 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Bundled ML Kit Face Detection Model for Offline Execution -->
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="face" />
-
         <!-- Foreground Camera Service for Continuous Driver Monitoring (API 24 - 37) -->
         <service
             android:name=".DriverMonitoringService"

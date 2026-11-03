@@ -219,6 +219,9 @@ class FakeEyeStateClassifier implements EyeStateClassifier {
   bool isLoaded = false;
 
   @override
+  bool outputIsSoftmaxed = true;
+
+  @override
   ModelArchitecture architecture = ModelArchitecture.yoloDetector;
 
   @override

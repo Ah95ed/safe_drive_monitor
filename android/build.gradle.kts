@@ -30,7 +30,6 @@ subprojects {
                 "androidx.concurrent:concurrent-futures:1.2.0"
             )
         }
-         
     }
 }
 subprojects {
@@ -40,6 +39,8 @@ subprojects {
                 .using(module("com.google.ai.edge.litert:litert:1.4.0"))
             substitute(module("org.tensorflow:tensorflow-lite-gpu"))
                 .using(module("com.google.ai.edge.litert:litert-gpu:1.4.0"))
+            substitute(module("com.google.android.gms:play-services-mlkit-face-detection"))
+                .using(module("com.google.mlkit:face-detection:16.1.7"))
         }
     }
 }

@@ -14,6 +14,7 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 
 abstract class EyeStateClassifier {
   bool get isLoaded;
+  bool get outputIsSoftmaxed;
   ModelArchitecture get architecture;
   bool get invertYoloClasses;
   set invertYoloClasses(bool value);
@@ -58,6 +59,11 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
   @override
   ModelArchitecture get architecture => _architecture;
 
+  bool _outputIsSoftmaxed = false;
+
+  @override
+  bool get outputIsSoftmaxed => _outputIsSoftmaxed;
+
   @override
   ModelOutputMode outputMode;
 
@@ -84,7 +90,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     ImagePreprocessor? preprocessor,
     this.outputMode = ModelOutputMode.auto,
     this.minOpenConfidence = 0.55,
-    this.minClosedConfidence = 0.55,
+    this.minClosedConfidence = 0.50,
   }) : _preprocessor = preprocessor ?? ImagePreprocessor();
 
   @override
@@ -169,6 +175,17 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         );
       }
 
+      final outputType = outputTensor.type;
+      if (outputType != TensorType.float32 &&
+          outputType != TensorType.float16 &&
+          outputType != TensorType.uint8 &&
+          outputType != TensorType.int8) {
+        throw ModelLoadException(
+          'MODEL_CONTRACT_INVALID: Unsupported TFLite output type: ${outputTensor.type}. '
+          'Expected float32, float16, uint8, or int8.',
+        );
+      }
+
       _architecture = isYolo ? ModelArchitecture.yoloDetector : ModelArchitecture.classification;
 
       // 4. Set appropriate normalization:
@@ -244,6 +261,28 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
       if (outputTensor.type == TensorType.float16) {
         final outputBytes = outputTensor.data;
         outputFloats = _convertHalfBytesToFloat32List(outputBytes);
+      } else if (outputTensor.type == TensorType.uint8) {
+        final outputBytes = outputTensor.data;
+        final params = outputTensor.params;
+        final double scale = params.scale;
+        final int zeroPoint = params.zeroPoint;
+        outputFloats = Float32List(outputBytes.length);
+        for (int i = 0; i < outputBytes.length; i++) {
+          outputFloats[i] = (outputBytes[i] - zeroPoint) * scale;
+        }
+      } else if (outputTensor.type == TensorType.int8) {
+        final outputBytes = outputTensor.data;
+        final int8Data = outputBytes.buffer.asInt8List(
+          outputBytes.offsetInBytes,
+          outputBytes.lengthInBytes,
+        );
+        final params = outputTensor.params;
+        final double scale = params.scale;
+        final int zeroPoint = params.zeroPoint;
+        outputFloats = Float32List(int8Data.length);
+        for (int i = 0; i < int8Data.length; i++) {
+          outputFloats[i] = (int8Data[i] - zeroPoint) * scale;
+        }
       } else {
         final outputBytes = outputTensor.data;
         outputFloats = outputBytes.buffer.asFloat32List(
@@ -293,6 +332,7 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
         // Classification model [1, 2]
         openScore = outputFloats.isNotEmpty ? outputFloats[0] : 0.0;
         closedScore = outputFloats.length > 1 ? outputFloats[1] : 0.0;
+        _outputIsSoftmaxed = EyePredictionModel.looksLikeProbabilities(openScore, closedScore);
       }
 
       stopwatch.stop();

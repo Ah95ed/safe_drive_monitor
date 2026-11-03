@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/widgets.dart';
@@ -100,6 +99,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   DateTime _lastFrameProcessedTimestamp = DateTime.now();
   DateTime _lastInferenceTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastFaceDetectionTimestamp = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime? _faceLostSince;
+  DateTime? _lastFaceLostWarningAt;
   DateTime _lastUiNotificationTimestamp = DateTime.fromMillisecondsSinceEpoch(
     0,
   );
@@ -614,6 +615,8 @@ class DrowsinessDetectionProvider extends ChangeNotifier
       // 6. Reset analyzers, trackers, scheduler, lighting
       _lifecycleEpoch = 0;
       _lastLifecycleTransitionAt = null;
+      _faceLostSince = null;
+      _lastFaceLostWarningAt = null;
       _backgroundDetectionArmed = true;
       _freshPredictionsAfterTransition = 0;
       _drowsinessAnalyzer.reset();
@@ -894,8 +897,17 @@ class DrowsinessDetectionProvider extends ChangeNotifier
           hasDriverFace: false,
           now: now,
         );
-        _alertState = analysisResult.alertState;
-        _statusMessage = analysisResult.statusMessage;
+
+        _faceLostSince ??= now;
+        final faceLostDuration = now.difference(_faceLostSince!);
+        if (faceLostDuration >= const Duration(seconds: 2)) {
+          _alertState = DriverAlertState.noFaceDetected;
+          _statusMessage =
+              'لم يتم رصد وجه السائق لأكثر من ثانيتين - يرجى توجيه الكاميرا';
+        } else {
+          _alertState = analysisResult.alertState;
+          _statusMessage = analysisResult.statusMessage;
+        }
 
         // CRITICAL: Record inference heartbeat in watchdog!
         // The pipeline is active and healthy, successfully evaluating the frame (no face).
@@ -915,6 +927,20 @@ class DrowsinessDetectionProvider extends ChangeNotifier
         await _audioAlarmService.stopAlarm();
         await _hapticService.stopAlarmHaptic();
 
+        // If face is lost for > 2 seconds, emit distinct technical warning every 3s (Section A8)
+        if (_alertState == DriverAlertState.noFaceDetected) {
+          if (_lastFaceLostWarningAt == null ||
+              now.difference(_lastFaceLostWarningAt!) >=
+                  const Duration(seconds: 3)) {
+            _lastFaceLostWarningAt = now;
+            _audioAlarmService.playTechnicalWarning();
+            _hapticService.playWarningHaptic();
+            _foregroundService.updateNotificationStatus(
+              '⚠️ لم يتم رصد وجه السائق - يرجى توجيه الكاميرا',
+            );
+          }
+        }
+
         totalStopwatch.stop();
         _totalFrameProcessingTime = totalStopwatch.elapsed;
         _processedFramesCount++;
@@ -922,7 +948,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier
         return;
       }
 
-      // 2. Face is active! Extract dynamicRoi from driver face
+      // 2. Face is active! Reset face lost warning timer and extract dynamicRoi
+      _faceLostSince = null;
+      _lastFaceLostWarningAt = null;
       final dynamicRoi = (_roiStrategy != RoiStrategy.legacyCenterCrop)
           ? (_currentDriverFace!.eyeRoi)
           : null;
@@ -936,9 +964,11 @@ class DrowsinessDetectionProvider extends ChangeNotifier
 
       if (_disposed || !_isMonitoring) return;
 
-      // 3. Multi-modal Sensor Fusion:
-      // Combine TFLite eye crop prediction with ML Kit Face Detector's native eye open probability.
-      EyePrediction prediction = rawPrediction;
+      // 3. Multi-modal Sensor Fusion & Secondary Signal Rule:
+      // TFLite remains the primary and sole decision maker for eye state.
+      // If ML Kit's eyeOpenProb strongly contradicts TFLite (> 0.6 diff),
+      // we boost the inference rate to re-check rapidly without overriding TFLite's decision.
+      final EyePrediction prediction = rawPrediction;
       final bool isMlKitFresh =
           _currentDriverFace != null &&
           now.difference(_currentDriverFace!.detectedAt) <=
@@ -948,33 +978,15 @@ class DrowsinessDetectionProvider extends ChangeNotifier
           : null;
 
       if (mlKitOpenProb != null) {
-        if (mlKitOpenProb >= 0.60) {
-          // ML Kit strongly indicates eyes are OPEN: guarantee OPEN state and high confidence
-          if (rawPrediction.state != EyeState.open ||
-              rawPrediction.confidence < mlKitOpenProb) {
-            prediction = EyePrediction(
-              state: EyeState.open,
-              openScore: mlKitOpenProb,
-              closedScore: 1.0 - mlKitOpenProb,
-              confidence: mlKitOpenProb,
-              inferenceTime: rawPrediction.inferenceTime,
-              timestamp: rawPrediction.timestamp,
-            );
-          }
-        } else if (mlKitOpenProb <= 0.20 &&
-            rawPrediction.state == EyeState.closed) {
-          // Both confirm CLOSED with high confidence
-          final double closedConf = max(
-            rawPrediction.confidence,
-            1.0 - mlKitOpenProb,
-          );
-          prediction = EyePrediction(
-            state: EyeState.closed,
-            openScore: mlKitOpenProb,
-            closedScore: 1.0 - mlKitOpenProb,
-            confidence: closedConf,
-            inferenceTime: rawPrediction.inferenceTime,
-            timestamp: rawPrediction.timestamp,
+        final double contradictionDiff =
+            (rawPrediction.openScore - mlKitOpenProb).abs();
+        if (contradictionDiff > 0.60) {
+          _inferenceInterval =
+              _drowsinessAnalyzer.config.alertInferenceInterval;
+          AppLogger.warning(
+            'SECONDARY_SIGNAL_CONTRADICTION',
+            'TFLite open=${rawPrediction.openScore.toStringAsFixed(2)} vs MLKit open=${mlKitOpenProb.toStringAsFixed(2)} '
+            '(diff=${contradictionDiff.toStringAsFixed(2)} > 0.60). Accelerating inference rate.',
           );
         }
       }

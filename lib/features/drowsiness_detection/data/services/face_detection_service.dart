@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/face_roi_detector.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/driver_face.dart';
 
 abstract class FaceDetectionService {
@@ -72,34 +73,20 @@ class MlKitFaceDetectionService implements FaceDetectionService {
 
         final rect = face.boundingBox;
 
-        // Compute initial eye ROI from landmarks or upper face bounds
-        Rect eyeRoi;
-        if (leftEye != null && rightEye != null) {
-          final minX = min(leftEye.x, rightEye.x).toDouble();
-          final maxX = max(leftEye.x, rightEye.x).toDouble();
-          final minY = min(leftEye.y, rightEye.y).toDouble();
-          final maxY = max(leftEye.y, rightEye.y).toDouble();
-
-          final eyeWidth = (maxX - minX);
-          final eyeHeight = max(16.0, (maxY - minY));
-
-          final padX = eyeWidth * 0.40;
-          final padY = max(eyeWidth * 0.35, eyeHeight * 1.2);
-
-          eyeRoi = Rect.fromLTRB(
-            minX - padX,
-            minY - padY,
-            maxX + padX,
-            maxY + padY,
-          );
-        } else {
-          eyeRoi = Rect.fromLTRB(
-            rect.left,
-            rect.top + rect.height * 0.18,
-            rect.right,
-            rect.top + rect.height * 0.55,
-          );
-        }
+        // Compute square, clamped eye ROI with 60% horizontal and 120% vertical expansion
+        final squareRoiResult = MlKitFaceRoiDetector.computeSquareEyeRoi(
+          face: face,
+          frameWidth: image.width,
+          frameHeight: image.height,
+          sensorRotation: sensorRotation,
+          detectedAt: now,
+        );
+        final eyeRoi = Rect.fromLTWH(
+          squareRoiResult.x.toDouble(),
+          squareRoiResult.y.toDouble(),
+          squareRoiResult.width.toDouble(),
+          squareRoiResult.height.toDouble(),
+        );
 
         return DriverFace(
           trackingId: face.trackingId,
