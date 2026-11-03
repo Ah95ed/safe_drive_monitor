@@ -8,6 +8,87 @@ import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/detection_pipeline.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/roi_strategy.dart';
 
+/// Direct, zero-allocation single-pass extraction of normalized Float32List from CameraImage ROI.
+/// Handles YUV420_888 (triplanar), NV12/NV21 (biplanar/single-plane), and BGRA8888 (iOS).
+Float32List yuvRoiToNormalizedFloat32({
+  required CameraImage image,
+  required Rect roi,
+  required int targetWidth,
+  required int targetHeight,
+  required int rotationDegrees,
+  required bool isMirrored,
+  required ModelInputNormalization normalization,
+  TensorChannelLayout layout = TensorChannelLayout.interleavedRgb,
+  Float32List? destinationBuffer,
+}) {
+  final buffer =
+      destinationBuffer ?? Float32List(targetWidth * targetHeight * 3);
+  final int srcWidth = image.width;
+  final int srcHeight = image.height;
+
+  final bool isSwapped = rotationDegrees == 90 || rotationDegrees == 270;
+  final int rotWidth = isSwapped ? srcHeight : srcWidth;
+  final int rotHeight = isSwapped ? srcWidth : srcHeight;
+
+  final double roiLeft = roi.left.clamp(0.0, rotWidth - 1.0);
+  final double roiTop = roi.top.clamp(0.0, rotHeight - 1.0);
+  final double roiWidth = roi.width.clamp(1.0, rotWidth - roiLeft);
+  final double roiHeight = roi.height.clamp(1.0, rotHeight - roiTop);
+
+  final int planeSize = targetWidth * targetHeight;
+  final double stepX = roiWidth / targetWidth;
+  final double stepY = roiHeight / targetHeight;
+
+  if (image.format.group == ImageFormatGroup.bgra8888) {
+    if (image.planes.isEmpty) {
+      throw const ImageConversionException('BGRA8888 image has no planes');
+    }
+    ImagePreprocessor.sampleBgraDirect(
+      image,
+      buffer,
+      outWidth: targetWidth,
+      outHeight: targetHeight,
+      planeSize: planeSize,
+      srcWidth: srcWidth,
+      srcHeight: srcHeight,
+      roiLeft: roiLeft,
+      roiTop: roiTop,
+      stepX: stepX,
+      stepY: stepY,
+      sensorRotation: rotationDegrees,
+      isMirrored: isMirrored,
+      isPlanar: layout == TensorChannelLayout.planarRgb,
+      normalization: normalization,
+    );
+  } else if (image.format.group == ImageFormatGroup.yuv420 ||
+      image.format.group == ImageFormatGroup.nv21 ||
+      image.planes.isNotEmpty) {
+    ImagePreprocessor.sampleYuvDirect(
+      image,
+      buffer,
+      outWidth: targetWidth,
+      outHeight: targetHeight,
+      planeSize: planeSize,
+      srcWidth: srcWidth,
+      srcHeight: srcHeight,
+      roiLeft: roiLeft,
+      roiTop: roiTop,
+      stepX: stepX,
+      stepY: stepY,
+      sensorRotation: rotationDegrees,
+      isMirrored: isMirrored,
+      isPlanar: layout == TensorChannelLayout.planarRgb,
+      normalization: normalization,
+    );
+  } else {
+    throw ImageConversionException(
+      'UNSUPPORTED_IMAGE_FORMAT: format ${image.format.group.name} with ${image.planes.length} planes is not supported',
+    );
+  }
+
+  return buffer;
+}
+
 /// Preprocesses camera frames for TensorFlow Lite inference.
 /// Includes direct zero-allocation ROI extraction from raw camera buffers (YUV420/NV21/BGRA)
 /// as well as legacy image-based pipeline for debugging and compatibility testing.
@@ -130,57 +211,22 @@ class ImagePreprocessor {
       }
     }
 
-    // 2. Direct Sub-sampling loop
-    final int outWidth = _inputWidth;
-    final int outHeight = _inputHeight;
-    final int planeSize = outWidth * outHeight;
-
-    final double stepX = roiWidth / outWidth;
-    final double stepY = roiHeight / outHeight;
-
-    if (cameraImage.format.group == ImageFormatGroup.bgra8888) {
-      _sampleBgraDirect(
-        cameraImage,
-        buffer,
-        outWidth: outWidth,
-        outHeight: outHeight,
-        planeSize: planeSize,
-        srcWidth: srcWidth,
-        srcHeight: srcHeight,
-        roiLeft: roiLeft,
-        roiTop: roiTop,
-        stepX: stepX,
-        stepY: stepY,
-        sensorRotation: sensorRotation,
-        isMirrored: isMirrored,
-        isPlanar: activeLayout == TensorChannelLayout.planarRgb,
-        normalization: normalization,
-      );
-    } else {
-      // YUV420_888 & NV21
-      _sampleYuvDirect(
-        cameraImage,
-        buffer,
-        outWidth: outWidth,
-        outHeight: outHeight,
-        planeSize: planeSize,
-        srcWidth: srcWidth,
-        srcHeight: srcHeight,
-        roiLeft: roiLeft,
-        roiTop: roiTop,
-        stepX: stepX,
-        stepY: stepY,
-        sensorRotation: sensorRotation,
-        isMirrored: isMirrored,
-        isPlanar: activeLayout == TensorChannelLayout.planarRgb,
-        normalization: normalization,
-      );
-    }
-
-    return buffer;
+    // 2. Direct Sub-sampling via yuvRoiToNormalizedFloat32
+    final Rect targetRoi = Rect.fromLTWH(roiLeft, roiTop, roiWidth, roiHeight);
+    return yuvRoiToNormalizedFloat32(
+      image: cameraImage,
+      roi: targetRoi,
+      targetWidth: _inputWidth,
+      targetHeight: _inputHeight,
+      rotationDegrees: sensorRotation,
+      isMirrored: isMirrored,
+      normalization: normalization,
+      layout: activeLayout,
+      destinationBuffer: buffer,
+    );
   }
 
-  static void _sampleYuvDirect(
+  static void sampleYuvDirect(
     CameraImage cameraImage,
     Float32List buffer, {
     required int outWidth,
@@ -197,20 +243,51 @@ class ImagePreprocessor {
     required bool isPlanar,
     required ModelInputNormalization normalization,
   }) {
+    if (cameraImage.planes.isEmpty) {
+      throw const ImageConversionException('YUV image has no planes');
+    }
+
+    final int numPlanes = cameraImage.planes.length;
     final Plane yPlane = cameraImage.planes[0];
-    final Plane uPlane = cameraImage.planes[1];
-    final Plane vPlane = cameraImage.planes[2];
-
     final Uint8List yBytes = yPlane.bytes;
-    final Uint8List uBytes = uPlane.bytes;
-    final Uint8List vBytes = vPlane.bytes;
-
     final int yRowStride = yPlane.bytesPerRow;
-    final int uRowStride = uPlane.bytesPerRow;
-    final int uPixelStride = uPlane.bytesPerPixel ?? 1;
-    final int vPixelStride = vPlane.bytesPerPixel ?? 1;
+
+    final Uint8List? uBytes;
+    final Uint8List? vBytes;
+    final int uRowStride;
+    final int vRowStride;
+    final int uPixelStride;
+    final int vPixelStride;
+
+    if (numPlanes >= 3) {
+      final Plane uPlane = cameraImage.planes[1];
+      final Plane vPlane = cameraImage.planes[2];
+      uBytes = uPlane.bytes;
+      vBytes = vPlane.bytes;
+      uRowStride = uPlane.bytesPerRow;
+      vRowStride = vPlane.bytesPerRow;
+      uPixelStride = uPlane.bytesPerPixel ?? 1;
+      vPixelStride = vPlane.bytesPerPixel ?? 1;
+    } else if (numPlanes == 2) {
+      final Plane uvPlane = cameraImage.planes[1];
+      uBytes = uvPlane.bytes;
+      vBytes = uvPlane.bytes;
+      uRowStride = uvPlane.bytesPerRow;
+      vRowStride = uvPlane.bytesPerRow;
+      uPixelStride = uvPlane.bytesPerPixel ?? 2;
+      vPixelStride = uvPlane.bytesPerPixel ?? 2;
+    } else {
+      // Single-plane NV21
+      uBytes = yBytes;
+      vBytes = yBytes;
+      uRowStride = yRowStride;
+      vRowStride = yRowStride;
+      uPixelStride = 2;
+      vPixelStride = 2;
+    }
 
     final bool isZeroToOne = normalization == ModelInputNormalization.zeroToOne;
+    final int singlePlaneUvOffset = numPlanes == 1 ? yRowStride * srcHeight : 0;
 
     int pixelIndex = 0;
 
@@ -246,16 +323,28 @@ class ImagePreprocessor {
             break;
         }
 
-        // Direct YUV to RGB Conversion
         final int yIndex = srcY * yRowStride + srcX;
         final int uvX = srcX >> 1;
         final int uvY = srcY >> 1;
-        final int uIndex = uvY * uRowStride + (uvX * uPixelStride);
-        final int vIndex = uvY * uRowStride + (uvX * vPixelStride);
 
         final int yVal = yBytes[yIndex];
-        final int uVal = uBytes[uIndex] - 128;
-        final int vVal = vBytes[vIndex] - 128;
+        final int uVal;
+        final int vVal;
+
+        if (numPlanes >= 3) {
+          final int uIndex = uvY * uRowStride + (uvX * uPixelStride);
+          final int vIndex = uvY * vRowStride + (uvX * vPixelStride);
+          uVal = uBytes[uIndex] - 128;
+          vVal = vBytes[vIndex] - 128;
+        } else if (numPlanes == 2) {
+          final int uvIndex = uvY * uRowStride + (uvX * uPixelStride);
+          uVal = uBytes[uvIndex] - 128;
+          vVal = (uvIndex + 1 < uBytes.length ? uBytes[uvIndex + 1] : 128) - 128;
+        } else {
+          final int uvIndex = singlePlaneUvOffset + uvY * uRowStride + (uvX * 2);
+          vVal = (uvIndex < uBytes.length ? uBytes[uvIndex] : 128) - 128; // NV21: V then U
+          uVal = (uvIndex + 1 < uBytes.length ? uBytes[uvIndex + 1] : 128) - 128;
+        }
 
         // Fixed-point RGB conversion
         final int r = (yVal + ((1436 * vVal) >> 10)).clamp(0, 255);
@@ -283,7 +372,7 @@ class ImagePreprocessor {
     }
   }
 
-  static void _sampleBgraDirect(
+  static void sampleBgraDirect(
     CameraImage cameraImage,
     Float32List buffer, {
     required int outWidth,

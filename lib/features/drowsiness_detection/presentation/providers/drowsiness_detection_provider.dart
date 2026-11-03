@@ -12,6 +12,7 @@ import 'package:safe_drive_monitor/core/services/haptic_service.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/camera_service.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/eye_state_classifier.dart';
+import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/inference_worker.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/data/services/face_detection_service.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/detection_mode.dart';
 import 'package:safe_drive_monitor/features/drowsiness_detection/domain/entities/detection_pipeline.dart';
@@ -133,7 +134,7 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     ThermalManagerService? thermalService,
     AdaptiveInferenceScheduler? scheduler,
   }) : _cameraService = cameraService ?? AppCameraService(),
-       _classifier = classifier ?? TfliteEyeStateClassifier(),
+       _classifier = classifier ?? IsolateEyeStateClassifier(),
        _faceDetectionService =
            faceDetectionService ?? MlKitFaceDetectionService(),
        _faceTracker = faceTracker ?? DriverFaceTracker(),
