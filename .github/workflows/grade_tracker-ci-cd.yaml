@@ -29,18 +29,18 @@ jobs:
           channel: stable
           flutter-version: "3.47.9"
 
-      - name: Decode Keystore
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > D:/Android_Keys/key.jks
+      # - name: Decode Keystore
+      #   run: |
+      #     echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > D:/Android_Keys/key.jks
 
-      - name: Create key.properties
-        run: |
-          cat <<EOF > D:/Android_Keys/key.properties
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=key.jks
-          EOF
+      # - name: Create key.properties
+      #   run: |
+      #     cat <<EOF > D:/Android_Keys/key.properties
+      #     storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+      #     keyPassword=${{ secrets.KEY_PASSWORD }}
+      #     keyAlias=${{ secrets.KEY_ALIAS }}
+      #     storeFile=key.jks
+      #     EOF
 
       - name: Install dependencies
         run: flutter pub get
