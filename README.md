@@ -52,12 +52,42 @@
 
 | المعيار | القيمة |
 | :--- | :--- |
-| **Model Path** | `assets/models/eye_state_model_tensorFlow.tflite` |
-| **Input Shape** | `[1, 224, 224, 3]` (Float32) |
-| **Normalization** | `(pixel - 128.0) / 128.0` $\rightarrow$ Range `[-1.0, 1.0]` |
-| **Output Shape** | `[1, 2]` (Index 0: **Open**, Index 1: **Closed**) |
-| **Inference Engine** | TensorFlow Lite / LiteRT Native Bindings |
-| **Memory Strategy** | Direct native pointer Float32 buffers & Preallocated tensors |
+| **Model Path** | `assets/models/eye_detector_5n_320_float16.tflite` |
+| **Input Shape** | `[1, 320, 320, 3]` / `[1, 224, 224, 3]` (Float32 / Float16) |
+| **Inference Engine** | Dedicated Background Isolate Worker via TensorFlow Lite / LiteRT |
+| **Security** | AES-256-GCM In-Memory Decryption via Native JNI Key Derivation |
+| **Face ROI Engine** | Google ML Kit (Bundled Offline `com.google.mlkit:face-detection:16.1.7`) |
+| **Memory Strategy** | Direct Zero-Copy YUV ROI Pixel Sampling (< 2ms) + Gamma LUT (0.75) |
+
+---
+
+## 🛡️ قواعد السلامة والأمان (Safety & Security Guarantees)
+
+1. **القاعدة الذهبية للسلامة**: لا توجد أي حالة يفشل فيها النظام بصمت. أي انقطاع في تدفق الفريمات، تجمد في الذكاء الاصطناعي، انخفاض حرج في الإضاءة، أو فقدان لوجه السائق يُطلق فوراً نغمة تحذيرية ثنائية (`warning.mp3` بتردد 2-4 kHz) أو إنذاراً مستمراً.
+2. **وضع القيادة الافتراضي (OLED Power Saver)**: شاشة سوداء نقية (`#000000`) دون رندرة لمعاينة الكاميرا لتبريد الهاتف وتوفير الطاقة، مع مؤشر نبضي خافت وإمكانية النقر في أي مكان لإيقاظ واجهة الـ HUD لمدة 5 ثوانٍ، وتتحول الشاشة للأحمر فوراً عند أي إنذار.
+3. **أوفلاين 100% وحجب الشبكة**: تم سحب إذن `android.permission.INTERNET` بالكامل عبر `tools:node="remove"`.
+4. **تشفير الموديل في الذاكرة**: يُشفر الموديل أثناء البناء بأداة `tool/encrypt_model.dart` ويُفك في الذاكرة الحية (RAM) فقط عبر قناة Native دون كتابة أي ملف مؤقت على القرص.
+
+---
+
+## 🛠️ أوامر التطوير والتحقق (Development & Testing)
+
+```bash
+# تثبيت التبعيات
+flutter pub get
+
+# فحص الجودة البرمجية والتحليل الصارم
+flutter analyze --fatal-warnings
+
+# تشغيل كافة الاختبارات الوحدوية
+flutter test test/unit/
+
+# تشفير الموديل لحزمة الإنتاج (AES-256-GCM)
+dart run tool/encrypt_model.dart
+
+# بناء حزم APK مفصولة حسب المعمارية (Release Split-ABI)
+flutter build apk --release --split-per-abi
+```
 
 ---
 

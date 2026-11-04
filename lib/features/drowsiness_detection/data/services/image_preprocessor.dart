@@ -472,6 +472,7 @@ class ImagePreprocessor {
   }
 
   /// Legacy image-based conversion method for compatibility checks and test assertions.
+  @Deprecated('Use zero-copy fast YUV sampling via yuvRoiToNormalizedFloat32 instead')
   Float32List preprocessCameraImageLegacy(
     CameraImage cameraImage, {
     int sensorRotation = 0,

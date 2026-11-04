@@ -4,6 +4,12 @@ All notable behavioral and structural changes to this project will be documented
 
 ## [Unreleased]
 
+### Phase 7 — Permissions Lockdown, Deprecations & Architecture Documentation (docs(core))
+- **Network Permissions Lockdown (`AndroidManifest.xml`)**: Enforced complete offline isolation by explicitly removing `android.permission.INTERNET` using `tools:node="remove"`.
+- **Legacy Pipeline Deprecation**: Marked `preprocessCameraImageLegacy` with `@Deprecated` guidance to enforce using the zero-copy fast YUV sampling pipeline.
+- **FPS Smoothing Verification**: Confirmed Exponential Moving Average (alpha = 0.15) for stable UI frame rate indicators.
+- **Architecture Documentation & Readme Updates**: Created `docs/ARCHITECTURE.md` specifying complete multi-isolate pipeline flow, safety state machine, recovery criteria, power management, and crypto security specifications. Updated `README.md` with system prerequisites and CLI commands.
+
 ### Phase 6 — Intellectual Property Security & Integrity (feat(security))
 - **AES-256-GCM Model Encryption CLI**: Created `tool/encrypt_model.js` and `tool/encrypt_model.dart` for build-time neural network weight encryption with `SDM_ENC\x01` magic container format.
 - **In-Memory Native Decryption (`Interpreter.fromBuffer`)**: Integrated native AES-256-GCM in-memory decryption bridge via Android MethodChannel (`decryptModelBuffer`). Key is derived natively from package identity and salt. Decrypted bytes are strictly ephemeral in RAM and never written to persistent disk.
