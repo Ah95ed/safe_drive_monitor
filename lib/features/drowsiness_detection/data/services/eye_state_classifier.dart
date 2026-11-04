@@ -1,6 +1,6 @@
 import 'dart:typed_data';
-import 'dart:ui';
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
 import 'package:safe_drive_monitor/core/constants/model_constants.dart';
 import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
 import 'package:safe_drive_monitor/core/utils/app_logger.dart';
@@ -118,11 +118,47 @@ class TfliteEyeStateClassifier implements EyeStateClassifier {
     if (_interpreter != null) return;
 
     try {
+      Uint8List? decryptedBuffer;
+      try {
+        final byteData = await rootBundle.load(ModelConstants.modelAssetPath);
+        final rawBytes = byteData.buffer.asUint8List(
+          byteData.offsetInBytes,
+          byteData.lengthInBytes,
+        );
+        if (rawBytes.length > 8 &&
+            rawBytes[0] == 0x53 &&
+            rawBytes[1] == 0x44 &&
+            rawBytes[2] == 0x4D &&
+            rawBytes[3] == 0x5F &&
+            rawBytes[4] == 0x45 &&
+            rawBytes[5] == 0x4E &&
+            rawBytes[6] == 0x43 &&
+            rawBytes[7] == 0x01) {
+          AppLogger.info(_tag, 'Encrypted model detected. Decrypting in-memory via native channel...');
+          const nativeChannel = MethodChannel(
+            'com.eyewatchdriver.eye.safe_drive_monitor/foreground_service',
+          );
+          decryptedBuffer = await nativeChannel.invokeMethod<Uint8List>(
+            'decryptModelBuffer',
+            {'encryptedBytes': rawBytes},
+          );
+        }
+      } catch (e) {
+        AppLogger.info(_tag, 'Direct asset pass-through: $e');
+      }
+
       final options = InterpreterOptions()..threads = 2;
-      _interpreter = await Interpreter.fromAsset(
-        ModelConstants.modelAssetPath,
-        options: options,
-      );
+      if (decryptedBuffer != null && decryptedBuffer.isNotEmpty) {
+        _interpreter = Interpreter.fromBuffer(
+          decryptedBuffer,
+          options: options,
+        );
+      } else {
+        _interpreter = await Interpreter.fromAsset(
+          ModelConstants.modelAssetPath,
+          options: options,
+        );
+      }
 
       // Pre-allocate tensors on load
       _interpreter!.allocateTensors();

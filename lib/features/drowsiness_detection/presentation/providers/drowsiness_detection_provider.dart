@@ -440,6 +440,34 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     }
   }
 
+  Future<void> _checkEnvironmentIntegrity() async {
+    try {
+      const channel = MethodChannel(
+        'com.eyewatchdriver.eye.safe_drive_monitor/foreground_service',
+      );
+      final result = await channel.invokeMapMethod<String, dynamic>(
+        'checkSecurityEnvironment',
+      );
+      if (result != null) {
+        final isRooted = result['isRooted'] as bool? ?? false;
+        final isDebugger = result['isDebuggerAttached'] as bool? ?? false;
+        final isHooking = result['isHookingDetected'] as bool? ?? false;
+        final riskScore = result['riskScore'] as int? ?? 0;
+
+        if (isRooted || isDebugger || isHooking || riskScore > 0) {
+          AppLogger.warning(
+            'SecurityIntegrity',
+            'Non-standard execution environment: rooted=$isRooted, debugger=$isDebugger, hooking=$isHooking, riskScore=$riskScore. Monitoring will proceed for driver safety.',
+          );
+        } else {
+          AppLogger.info('SecurityIntegrity', 'Device environment integrity verified healthy.');
+        }
+      }
+    } catch (e) {
+      AppLogger.info(_tag, 'Security environment check skipped: $e');
+    }
+  }
+
   @override
   void notifyListeners() {
     if (!_disposed) {
@@ -456,6 +484,9 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     notifyListeners();
 
     try {
+      // 0. Environment integrity check (non-blocking for driver safety)
+      await _checkEnvironmentIntegrity();
+
       // 1. Verify mandatory audio alert assets exist and are loadable
       await _verifyAudioAssets();
 

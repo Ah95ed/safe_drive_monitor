@@ -18,12 +18,14 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 /// Request message sent to initialize the dedicated inference isolate.
 class _WorkerInitRequest {
   final String modelAssetPath;
+  final Uint8List? modelBytes;
   final bool invertYoloClasses;
   final RootIsolateToken? rootIsolateToken;
   final SendPort mainSendPort;
 
   const _WorkerInitRequest({
     required this.modelAssetPath,
+    this.modelBytes,
     required this.invertYoloClasses,
     required this.rootIsolateToken,
     required this.mainSendPort,
@@ -191,8 +193,38 @@ class IsolateEyeStateClassifier implements EyeStateClassifier {
       token = RootIsolateToken.instance;
     } catch (_) {}
 
+    Uint8List? decryptedModelBytes;
+    try {
+      final byteData = await rootBundle.load(ModelConstants.modelAssetPath);
+      final rawBytes = byteData.buffer.asUint8List(
+        byteData.offsetInBytes,
+        byteData.lengthInBytes,
+      );
+      if (rawBytes.length > 8 &&
+          rawBytes[0] == 0x53 &&
+          rawBytes[1] == 0x44 &&
+          rawBytes[2] == 0x4D &&
+          rawBytes[3] == 0x5F &&
+          rawBytes[4] == 0x45 &&
+          rawBytes[5] == 0x4E &&
+          rawBytes[6] == 0x43 &&
+          rawBytes[7] == 0x01) {
+        AppLogger.info(_tag, 'Encrypted model detected. Decrypting in-memory via native channel...');
+        const nativeChannel = MethodChannel(
+          'com.eyewatchdriver.eye.safe_drive_monitor/foreground_service',
+        );
+        decryptedModelBytes = await nativeChannel.invokeMethod<Uint8List>(
+          'decryptModelBuffer',
+          {'encryptedBytes': rawBytes},
+        );
+      }
+    } catch (e) {
+      AppLogger.info(_tag, 'Direct model loading pass-through: $e');
+    }
+
     final initRequest = _WorkerInitRequest(
       modelAssetPath: ModelConstants.modelAssetPath,
+      modelBytes: decryptedModelBytes,
       invertYoloClasses: invertYoloClasses,
       rootIsolateToken: token,
       mainSendPort: _mainReceivePort!.sendPort,
@@ -375,10 +407,17 @@ void _inferenceWorkerEntryPoint(_WorkerInitRequest initRequest) async {
       // Fallback to default CPU delegate
     }
 
-    interpreter = await Interpreter.fromAsset(
-      initRequest.modelAssetPath,
-      options: options,
-    );
+    if (initRequest.modelBytes != null && initRequest.modelBytes!.isNotEmpty) {
+      interpreter = Interpreter.fromBuffer(
+        initRequest.modelBytes!,
+        options: options,
+      );
+    } else {
+      interpreter = await Interpreter.fromAsset(
+        initRequest.modelAssetPath,
+        options: options,
+      );
+    }
     interpreter.allocateTensors();
 
     final inputTensors = interpreter.getInputTensors();

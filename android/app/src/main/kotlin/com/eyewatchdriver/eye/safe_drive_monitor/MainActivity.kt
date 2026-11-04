@@ -100,9 +100,49 @@ class MainActivity : FlutterActivity() {
                         result.success(1.0)
                     }
                 }
+                "decryptModelBuffer" -> {
+                    val encryptedBytes = call.argument<ByteArray>("encryptedBytes")
+                    if (encryptedBytes == null) {
+                        result.error("INVALID_ARGUMENT", "Encrypted bytes must not be null", null)
+                    } else {
+                        try {
+                            val decrypted = decryptModelPayload(encryptedBytes)
+                            result.success(decrypted)
+                        } catch (e: Exception) {
+                            result.error("DECRYPTION_FAILED", e.message, null)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
+    }
+
+    // --- In-Memory Model Decryption (AES-256-GCM) ---
+
+    private fun deriveKey(): ByteArray {
+        val salt = "SafeDriveModelSec2026_AESGCM".toByteArray(Charsets.UTF_8)
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update(salt)
+        md.update(packageName.toByteArray(Charsets.UTF_8))
+        return md.digest()
+    }
+
+    private fun decryptModelPayload(payload: ByteArray): ByteArray {
+        val magic = "SDM_ENC".toByteArray(Charsets.UTF_8)
+        val offset: Int
+        if (payload.size > 28 && payload.take(7).toByteArray().contentEquals(magic)) {
+            offset = 8 // Skip 7 bytes magic + 1 byte version
+        } else {
+            offset = 0
+        }
+        val iv = payload.copyOfRange(offset, offset + 12)
+        val cipherBytes = payload.copyOfRange(offset + 12, payload.size)
+        val key = javax.crypto.spec.SecretKeySpec(deriveKey(), "AES")
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        val spec = javax.crypto.spec.GCMParameterSpec(128, iv)
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, spec)
+        return cipher.doFinal(cipherBytes)
     }
 
     // --- Security Environment Risk Signals (Root, Hooking, Debugger) ---

@@ -4,6 +4,12 @@ All notable behavioral and structural changes to this project will be documented
 
 ## [Unreleased]
 
+### Phase 6 — Intellectual Property Security & Integrity (feat(security))
+- **AES-256-GCM Model Encryption CLI**: Created `tool/encrypt_model.js` and `tool/encrypt_model.dart` for build-time neural network weight encryption with `SDM_ENC\x01` magic container format.
+- **In-Memory Native Decryption (`Interpreter.fromBuffer`)**: Integrated native AES-256-GCM in-memory decryption bridge via Android MethodChannel (`decryptModelBuffer`). Key is derived natively from package identity and salt. Decrypted bytes are strictly ephemeral in RAM and never written to persistent disk.
+- **Isolate Zero-Copy Buffer Transfer**: Enhanced `IsolateEyeStateClassifier` to load and pass in-memory decrypted model bytes to background worker isolates transparently.
+- **Non-Blocking Environment Integrity**: Added `checkSecurityEnvironment` startup evaluation checking for su binaries, test-keys, debugger attachment, and Frida hooking sockets. Logs security audit warnings without blocking driver drowsiness monitoring.
+
 ### Phase 5 — Packaging, ProGuard Rules, Assets & CI Validation (build(ci))
 - **Explicit Asset Pinning (`pubspec.yaml`)**: Pinned model (`assets/models/eye_detector_5n_320_float16.tflite`) and audio assets explicitly, removing broad wildcard directory inclusions to minimize APK footprint.
 - **Synthesized Technical Warning Sound**: Added `assets/sounds/warning.mp3` (2.8 kHz dual-beep audio tone, 44.1 kHz, 128 kbps) for non-drowsiness technical alerts.
