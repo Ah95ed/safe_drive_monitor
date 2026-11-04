@@ -1,7 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج التطبيق إذن الكاميرا الأمامية لمراقبة يقظة السائق واكتشاف علامات النعاس أثناء القيادة دون تخزين أو إرسال أي صور.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -28,13 +34,31 @@
 	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج التطبيق إذن الكاميرا الأمامية لمراقبة يقظة السائق واكتشاف علامات النعاس أثناء القيادة دون تخزين أو إرسال أي صور.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 		<key>UISceneConfigurations</key>
 		<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج التطبيق إذن الكاميرا الأمامية لمراقبة يقظة السائق واكتشاف علامات النعاس أثناء القيادة دون تخزين أو إرسال أي صور.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 			<key>UIWindowSceneSessionRoleApplication</key>
 			<array>
 				<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج التطبيق إذن الكاميرا الأمامية لمراقبة يقظة السائق واكتشاف علامات النعاس أثناء القيادة دون تخزين أو إرسال أي صور.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 					<key>UISceneClassName</key>
 					<string>UIWindowScene</string>
 					<key>UISceneConfigurationName</key>

@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:safe_drive_monitor/core/constants/app_constants.dart';
 import 'package:safe_drive_monitor/core/constants/model_state.dart';
+import 'package:safe_drive_monitor/core/errors/app_exceptions.dart';
 import 'package:safe_drive_monitor/core/services/alarm_controller.dart';
 import 'package:safe_drive_monitor/core/services/audio_alarm_service.dart';
 import 'package:safe_drive_monitor/core/services/battery_optimization_service.dart';
@@ -418,6 +420,25 @@ class DrowsinessDetectionProvider extends ChangeNotifier
   String? get modelErrorCode => null;
   String? get modelErrorMessage => null;
   bool get isModelReady => _classifier.isLoaded && _modelState == ModelState.ready;
+  bool _areAudioAssetsReady = false;
+  bool get areAudioAssetsReady => _areAudioAssetsReady;
+
+  Future<void> _verifyAudioAssets() async {
+    try {
+      await Future.wait([
+        rootBundle.load('assets/${AppConstants.alarmSoundAsset}'),
+        rootBundle.load('assets/${AppConstants.technicalWarningSoundAsset}'),
+      ]);
+      _areAudioAssetsReady = true;
+    } catch (e, st) {
+      _areAudioAssetsReady = false;
+      AppLogger.error(_tag, 'Mandatory audio assets failed to load: $e', e, st);
+      throw AudioAssetLoadException(
+        'تعذر تحميل ملفات التنبيه الصوتي (alarm/warning). لا يمكن بدء المراقبة بدون صوت.',
+        e,
+      );
+    }
+  }
 
   @override
   void notifyListeners() {
@@ -435,14 +456,17 @@ class DrowsinessDetectionProvider extends ChangeNotifier
     notifyListeners();
 
     try {
-      // 1. Load local asset TFLite model
+      // 1. Verify mandatory audio alert assets exist and are loadable
+      await _verifyAudioAssets();
+
+      // 2. Load local asset TFLite model
       AppLogger.info(_tag, 'Loading TFLite model from assets...');
       await _classifier.load();
 
       if (_disposed) return;
       _modelState = ModelState.ready;
 
-      // 2. Initialize Camera & Battery readiness
+      // 3. Initialize Camera & Battery readiness
       _statusMessage = 'جاري تهيئة الكاميرا...';
       notifyListeners();
       final results = await Future.wait([
@@ -479,10 +503,10 @@ class DrowsinessDetectionProvider extends ChangeNotifier
 
   /// Start monitoring, Foreground Camera Service, image stream and watchdog.
   Future<void> startMonitoring() async {
-    if (_isMonitoring || !_isInitialized || !_classifier.isLoaded) {
+    if (_isMonitoring || !_isInitialized || !_classifier.isLoaded || !_areAudioAssetsReady) {
       AppLogger.warning(
         _tag,
-        'Cannot start monitoring: classifierLoaded=${_classifier.isLoaded}, isInitialized=$_isInitialized',
+        'Cannot start monitoring: classifierLoaded=${_classifier.isLoaded}, isInitialized=$_isInitialized, audioAssetsReady=$_areAudioAssetsReady',
       );
       return;
     }

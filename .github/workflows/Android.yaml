@@ -2,68 +2,75 @@ name: Safe Drive CI/CD
 
 on:
   push:
+    branches:
+      - main
     tags:
-      - "v*" # يشتغل عند رفع تاغ مثل v1.0.0
+      - "v*"
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build_android:
-    name: APK Build
+  validate_and_build:
+    name: Validate, Test & Build APK
     runs-on: ubuntu-latest
     permissions:
-      contents: write # ضرورية لإنشاء Release
+      contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "21"
+          java-version: "17"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: "stable"
-          flutter-version: "3.47.9"
-
-      # - name: Decode Keystore
-      #   run: |
-      #     echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/key.jks
-
-      # - name: Create key.properties
-      #   run: |
-      #     cat <<EOF > android/key.properties
-      #     storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-      #     keyPassword=${{ secrets.KEY_PASSWORD }}
-      #     keyAlias=${{ secrets.KEY_ALIAS }}
-      #     storeFile=key.jks
-      #     EOF
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Code quality & static analysis
+        run: flutter analyze --fatal-warnings
 
-      - name: Upload APK Artifact
+      - name: Run unit tests
+        run: flutter test test/unit/
+
+      - name: Verify offline ML Kit dependency (Bundled assertion)
+        run: |
+          echo "Verifying offline bundled ML Kit configuration..."
+          cd android
+          ./gradlew app:dependencies --configuration releaseRuntimeClasspath > deps.txt
+          if grep -q "com.google.android.gms:play-services-mlkit-face-detection" deps.txt; then
+            echo "ERROR: Dynamic Play Services ML Kit detected! Must use offline bundled model."
+            exit 1
+          fi
+          if ! grep -q "com.google.mlkit:face-detection:16.1.7" deps.txt; then
+            echo "ERROR: Offline bundled ML Kit (16.1.7) not found in dependency graph!"
+            exit 1
+          fi
+          echo "Offline ML Kit assertion passed: com.google.mlkit:face-detection:16.1.7 is strictly bundled."
+          cd ..
+
+      - name: Build Split-per-ABI Release APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: split-abi-apks
+          path: build/app/outputs/flutter-apk/app-*-release.apk
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release on Tag
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-*-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-#           git add .github/workflows/android.yaml
-# git commit -m "fix: correct keystore relative path"
-# git push origin main
-# git tag -d v1.0.0
-# git push origin :refs/tags/v1.0.0
-# git tag v1.0.0
-# git push origin v1.0.0

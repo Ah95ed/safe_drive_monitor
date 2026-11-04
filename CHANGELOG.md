@@ -4,6 +4,14 @@ All notable behavioral and structural changes to this project will be documented
 
 ## [Unreleased]
 
+### Phase 5 — Packaging, ProGuard Rules, Assets & CI Validation (build(ci))
+- **Explicit Asset Pinning (`pubspec.yaml`)**: Pinned model (`assets/models/eye_detector_5n_320_float16.tflite`) and audio assets explicitly, removing broad wildcard directory inclusions to minimize APK footprint.
+- **Synthesized Technical Warning Sound**: Added `assets/sounds/warning.mp3` (2.8 kHz dual-beep audio tone, 44.1 kHz, 128 kbps) for non-drowsiness technical alerts.
+- **Audio Asset Pre-Flight Validation**: Implemented `_verifyAudioAssets()` during provider initialization to test loadability via `rootBundle.load()`. Added `AudioAssetLoadException` and disabled start monitoring button if audio alert assets fail to load.
+- **ProGuard / R8 Release Rules**: Updated `android/app/proguard-rules.pro` with explicit keep rules for TensorFlow Lite native interfaces and bundled Google ML Kit face detector (`com.google.android.gms.internal.mlkit_vision_face.**`).
+- **iOS Capabilities & Permissions**: Added `NSCameraUsageDescription` and `UIBackgroundModes: [audio]` to `ios/Runner/Info.plist`.
+- **Streamlined GitHub Actions Workflow (`.github/workflows/Android.yaml`)**: Configured Java 17, static analysis with fatal warnings, unit tests, offline bundled ML Kit assertion, split-per-abi release builds, and tag release artifact publishing.
+
 ### Phase 4 — Real-World Driving Robustness & Degraded States (feat(driving))
 - **Precomputed Gamma LUT Shadow Lifting**: Integrated precomputed 256-entry gamma lookup table (gamma = 0.75) within `ImagePreprocessor.gammaLut`. Activates seamlessly in `yuvRoiToNormalizedFloat32` when `isLowLight` is detected without runtime `math.pow()` overhead.
 - **Critical Ambient Darkness Safety Rule**: Updated `LightingManager` to require 3 consecutive seconds below critical darkness threshold (luminance < 15) before declaring `DriverAlertState.insufficientLight`, preventing transient shadow flickers from triggering degraded state alarms.

@@ -39,6 +39,11 @@ class AudioAlarmException extends AppException {
   const AudioAlarmException(super.message, [super.cause]);
 }
 
+/// Thrown when loading mandatory audio alert assets fails.
+class AudioAssetLoadException extends AppException {
+  const AudioAssetLoadException(super.message, [super.cause]);
+}
+
 /// Thrown when starting, stopping or communicating with the Android Foreground Service fails.
 class ForegroundServiceException extends AppException {
   const ForegroundServiceException(super.message, [super.cause]);

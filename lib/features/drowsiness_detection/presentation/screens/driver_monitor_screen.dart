@@ -386,8 +386,12 @@ class _DriverMonitorScreenState extends State<DriverMonitorScreen> {
                               // Start / Stop Primary Action Button
                               PrimaryActionButton(
                                 isMonitoring: provider.isMonitoring,
-                                isEnabled: provider.isModelReady && provider.isInitialized,
-                                onPressed: (provider.isModelReady && provider.isInitialized)
+                                isEnabled: provider.isModelReady &&
+                                    provider.isInitialized &&
+                                    provider.areAudioAssetsReady,
+                                onPressed: (provider.isModelReady &&
+                                        provider.isInitialized &&
+                                        provider.areAudioAssetsReady)
                                     ? () async {
                                         if (provider.isMonitoring) {
                                           provider.stopMonitoring();

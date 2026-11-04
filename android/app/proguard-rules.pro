@@ -13,12 +13,14 @@
 
 # TensorFlow Lite / LiteRT native bindings
 -keep class org.tensorflow.lite.** { *; }
+-keep interface org.tensorflow.lite.** { *; }
 -keep class com.google.ai.edge.litert.** { *; }
 -dontwarn org.tensorflow.lite.**
 -dontwarn com.google.ai.edge.litert.**
 
-# Google ML Kit Face Detection
+# Google ML Kit Face Detection (bundled offline)
 -keep class com.google.mlkit.vision.face.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_face.** { *; }
 -keep class com.google.mlkit.common.** { *; }
 -dontwarn com.google.mlkit.**
 

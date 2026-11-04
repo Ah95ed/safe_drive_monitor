@@ -38,9 +38,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/models/
-    - assets/sounds/
-    - assets/images/
+    - assets/models/eye_detector_5n_320_float16.tflite
+    - assets/sounds/alarm.mp3
+    - assets/sounds/warning.mp3
 
   # fonts:
   #   - family: Schyler
