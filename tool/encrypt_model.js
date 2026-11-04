@@ -34,3 +34,4 @@ const finalPayload = Buffer.concat([magic, iv, encrypted, tag]);
 fs.writeFileSync(outputPath, finalPayload);
 console.log(`[ModelSecurity] Successfully encrypted ${rawData.length} bytes -> ${finalPayload.length} bytes.`);
 console.log(`[ModelSecurity] Output: ${outputPath}`);
+

@@ -30,3 +30,4 @@ Future<void> main(List<String> args) async {
   stdout.write(result.stdout);
   stdout.writeln('Model encryption completed successfully.');
 }
+

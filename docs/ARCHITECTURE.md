@@ -83,3 +83,4 @@ flowchart TD
 - **In-Memory Native Decryption**: Decrypted on startup via Android MethodChannel (`decryptModelBuffer`). Key is derived natively using SHA-256 over package identity and internal salt. Decrypted bytes exist strictly in RAM and are passed directly to `Interpreter.fromBuffer(modelBytes)`.
 - **Environment Integrity**: Non-blocking checks for `su` binaries, test-keys, debugger attachment, and Frida hooking sockets. Emits internal security warnings without disrupting driver safety monitoring.
 - **Zero Network Footprint**: `android.permission.INTERNET` is explicitly removed (`tools:node="remove"`).
+
